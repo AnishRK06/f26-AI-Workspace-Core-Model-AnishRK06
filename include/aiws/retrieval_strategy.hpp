@@ -8,22 +8,27 @@
 
 namespace aiws {
 
-// M2 PUBLIC-INTERFACE DESIGN TASK
-// Complete this class as a safe abstract polymorphic interface.
-// Keep the class name, operation name, parameter types, return type,
-// const qualification, and namespace unchanged.
+// Abstract interface for ranked retrieval over the current corpus.
+// ProcessingCore::search borrows its chunks and index to the strategy for
+// the length of one call; the strategy never owns or keeps them.
 class RetrievalStrategy {
 public:
-    // TODO: make destruction safe through a base-class pointer.
-    ~RetrievalStrategy() = default;
+    // virtual so deleting through unique_ptr<RetrievalStrategy> is safe
+    virtual ~RetrievalStrategy() = default;
 
-    // TODO: make this a required polymorphic operation.
-    virtual std::vector<SearchResult> search(const std::string&,
-                                             int,
-                                             const std::vector<Chunk>&,
-                                             const CorpusIndex&) const {
-        return {};
-    }
+    // pure virtual: abstract class, every derived strategy must implement it
+    virtual std::vector<SearchResult> search(const std::string& query,
+                                             int k,
+                                             const std::vector<Chunk>& chunks,
+                                             const CorpusIndex& index) const = 0;
+
+protected:
+    // blocks slicing through base references, derived classes stay copyable
+    RetrievalStrategy() = default;
+    RetrievalStrategy(const RetrievalStrategy&) = default;
+    RetrievalStrategy& operator=(const RetrievalStrategy&) = default;
+    RetrievalStrategy(RetrievalStrategy&&) = default;
+    RetrievalStrategy& operator=(RetrievalStrategy&&) = default;
 };
 
 }  // namespace aiws

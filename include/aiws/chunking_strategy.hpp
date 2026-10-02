@@ -8,20 +8,29 @@
 
 namespace aiws {
 
-// M2 PUBLIC-INTERFACE DESIGN TASK
-// Complete this class as a safe abstract polymorphic interface.
-// Keep the class name, operation name, parameter types, return type,
-// const qualification, and namespace unchanged.
+// Abstract interface for turning one document into ordered chunks.
+// ProcessingCore::rebuild only knows this type; the object behind it can be
+// Chunker (the default) or any caller-supplied derived class.
 class ChunkingStrategy {
 public:
-    // TODO: make destruction safe through a base-class pointer.
-    ~ChunkingStrategy() = default;
+    // virtual so that deleting through unique_ptr<ChunkingStrategy> runs the
+    // derived destructor too, not just this one
+    virtual ~ChunkingStrategy() = default;
 
-    // TODO: make this a required polymorphic operation.
-    virtual std::vector<Chunk> chunk(const Document&,
-                                     std::size_t) const {
-        return {};
-    }
+    // pure virtual: makes the class abstract and forces every derived
+    // strategy to provide its own chunking
+    virtual std::vector<Chunk> chunk(const Document& document,
+                                     std::size_t document_order) const = 0;
+
+protected:
+    // only derived classes can construct/copy/move the base part. stops
+    // slicing through a base reference (e.g. *a = *b on two different
+    // derived strategies) while still letting derived classes be copyable
+    ChunkingStrategy() = default;
+    ChunkingStrategy(const ChunkingStrategy&) = default;
+    ChunkingStrategy& operator=(const ChunkingStrategy&) = default;
+    ChunkingStrategy(ChunkingStrategy&&) = default;
+    ChunkingStrategy& operator=(ChunkingStrategy&&) = default;
 };
 
 }  // namespace aiws

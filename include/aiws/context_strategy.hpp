@@ -7,20 +7,23 @@
 
 namespace aiws {
 
-// M2 PUBLIC-INTERFACE DESIGN TASK
-// Complete this class as a safe abstract polymorphic interface.
-// Keep the class name, operation name, parameter types, return type,
-// const qualification, and namespace unchanged.
+// Abstract interface for turning ranked results into a bounded context.
 class ContextStrategy {
 public:
-    // TODO: make destruction safe through a base-class pointer.
-    ~ContextStrategy() = default;
+    // virtual so deleting through unique_ptr<ContextStrategy> is safe
+    virtual ~ContextStrategy() = default;
 
-    // TODO: make this a required polymorphic operation.
-    virtual std::vector<ContextItem> build(const std::vector<SearchResult>&,
-                                           std::size_t) const {
-        return {};
-    }
+    // pure virtual: abstract class, every derived strategy must implement it
+    virtual std::vector<ContextItem> build(const std::vector<SearchResult>& ranked,
+                                           std::size_t token_budget) const = 0;
+
+protected:
+    // blocks slicing through base references, derived classes stay copyable
+    ContextStrategy() = default;
+    ContextStrategy(const ContextStrategy&) = default;
+    ContextStrategy& operator=(const ContextStrategy&) = default;
+    ContextStrategy(ContextStrategy&&) = default;
+    ContextStrategy& operator=(ContextStrategy&&) = default;
 };
 
 }  // namespace aiws
