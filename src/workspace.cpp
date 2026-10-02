@@ -12,8 +12,6 @@ const std::vector<Document>& Workspace::documents() const noexcept {
     return documents_;
 }
 
-void Workspace::clear() noexcept {
-    documents_.clear();
-}
+void Workspace::clear() noexcept { documents_.clear(); }
 
 }  // namespace aiws

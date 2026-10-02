@@ -1,16 +1,13 @@
 #pragma once
 
-#include "aiws/processing_types.hpp"
-
-#include <cstddef>
-#include <vector>
+#include "aiws/context_strategy.hpp"
 
 namespace aiws {
 
-class ContextBuilder {
+class ContextBuilder final : public ContextStrategy {
 public:
     std::vector<ContextItem> build(const std::vector<SearchResult>& ranked,
-                                   std::size_t token_budget) const;
+                                   std::size_t token_budget) const override;
 };
 
 }  // namespace aiws

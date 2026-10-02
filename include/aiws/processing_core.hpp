@@ -1,6 +1,9 @@
 #pragma once
 
+#include "aiws/chunking_strategy.hpp"
+#include "aiws/context_strategy.hpp"
 #include "aiws/processing_types.hpp"
+#include "aiws/retrieval_strategy.hpp"
 #include "aiws/workspace.hpp"
 
 #include <cstddef>
@@ -17,7 +20,11 @@ public:
     static constexpr std::size_t kParagraphPreferenceWindow = 20;
 
     ProcessingCore();
+    ProcessingCore(std::unique_ptr<ChunkingStrategy> chunking,
+                   std::unique_ptr<RetrievalStrategy> retrieval,
+                   std::unique_ptr<ContextStrategy> context);
     ~ProcessingCore();
+
     ProcessingCore(ProcessingCore&&) noexcept;
     ProcessingCore& operator=(ProcessingCore&&) noexcept;
     ProcessingCore(const ProcessingCore&) = delete;
