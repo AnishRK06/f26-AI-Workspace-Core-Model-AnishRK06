@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(ai_workspace_m2 LANGUAGES CXX)
+project(ai_workspace_m3 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -18,6 +18,36 @@ add_library(aiws_m2
 target_include_directories(aiws_m2 PUBLIC include)
 target_compile_options(aiws_m2 PRIVATE -Wall -Wextra -Wpedantic)
 
+# ---- M3 GUI -------------------------------------------------------------
+# the M2 library above stays the backend. the GUI is its own executable that
+# links against it, so the GUI never reimplements any processing
+find_package(Qt6 REQUIRED COMPONENTS Widgets)
+
+# moc generates the hidden code behind Q_OBJECT / signals / slots. the gui
+# headers are listed below so moc sees them
+set(CMAKE_AUTOMOC ON)
+
+add_executable(ai_workspace_m3
+    src/main.cpp
+    src/main_window.cpp
+    src/workspace_widget.cpp
+    src/search_widget.cpp
+    src/context_widget.cpp
+    src/term_inspector_widget.cpp
+    src/search_result_model.cpp
+    include/aiws/gui/main_window.hpp
+    include/aiws/gui/resettable.hpp
+    include/aiws/gui/workspace_widget.hpp
+    include/aiws/gui/search_widget.hpp
+    include/aiws/gui/context_widget.hpp
+    include/aiws/gui/term_inspector_widget.hpp
+    include/aiws/gui/search_result_model.hpp
+)
+target_include_directories(ai_workspace_m3 PRIVATE include)
+target_link_libraries(ai_workspace_m3 PRIVATE aiws_m2 Qt6::Widgets)
+target_compile_options(ai_workspace_m3 PRIVATE -Wall -Wextra -Wpedantic)
+
+# ---- tests --------------------------------------------------------------
 add_executable(public_tests tests/public_tests.cpp)
 target_link_libraries(public_tests PRIVATE aiws_m2)
 target_compile_options(public_tests PRIVATE -Wall -Wextra -Wpedantic)
