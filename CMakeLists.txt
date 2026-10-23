@@ -18,7 +18,7 @@ add_library(aiws_m2
 target_include_directories(aiws_m2 PUBLIC include)
 target_compile_options(aiws_m2 PRIVATE -Wall -Wextra -Wpedantic)
 
-# ---- M3 GUI -------------------------------------------------------------
+# M3 GUI
 # the M2 library above stays the backend. the GUI is its own executable that
 # links against it, so the GUI never reimplements any processing
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
@@ -47,7 +47,7 @@ target_include_directories(ai_workspace_m3 PRIVATE include)
 target_link_libraries(ai_workspace_m3 PRIVATE aiws_m2 Qt6::Widgets)
 target_compile_options(ai_workspace_m3 PRIVATE -Wall -Wextra -Wpedantic)
 
-# ---- tests --------------------------------------------------------------
+# tests
 add_executable(public_tests tests/public_tests.cpp)
 target_link_libraries(public_tests PRIVATE aiws_m2)
 target_compile_options(public_tests PRIVATE -Wall -Wextra -Wpedantic)
