@@ -52,6 +52,7 @@ add_library(aiws_app STATIC
     src/term_inspector_widget.cpp
     src/search_result_model.cpp
     src/corpus_build_job.cpp
+    src/ipc_server.cpp
     include/aiws/gui/main_window.hpp
     include/aiws/gui/resettable.hpp
     include/aiws/gui/workspace_widget.hpp
@@ -60,6 +61,7 @@ add_library(aiws_app STATIC
     include/aiws/gui/term_inspector_widget.hpp
     include/aiws/gui/search_result_model.hpp
     include/aiws/gui/corpus_build_job.hpp
+    include/aiws/gui/ipc_server.hpp
 )
 target_include_directories(aiws_app PUBLIC include)
 target_link_libraries(aiws_app PUBLIC aiws_m2 aiws_ipc Qt6::Widgets)
