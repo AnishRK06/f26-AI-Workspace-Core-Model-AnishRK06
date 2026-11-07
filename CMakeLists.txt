@@ -30,6 +30,16 @@ target_include_directories(aiws_m2 PUBLIC include)
 target_link_libraries(aiws_m2 PUBLIC Threads::Threads)
 target_compile_options(aiws_m2 PRIVATE -Wall -Wextra -Wpedantic)
 
+# CR-1 wire format + socket read/write helpers. its own small library because
+# both the app (IPC server) and aiws_send (tools/) need it, and aiws_send
+# shouldn't have to link Qt or the GUI to get it
+add_library(aiws_ipc
+    src/ipc_protocol.cpp
+    include/aiws/ipc_protocol.hpp
+)
+target_include_directories(aiws_ipc PUBLIC include)
+target_compile_options(aiws_ipc PRIVATE -Wall -Wextra -Wpedantic)
+
 # everything except main(). in M3 this was all inside the executable, but M4
 # tests (and the autograder's tests) need to link MainWindow directly, so the
 # GUI moves into its own library. main.cpp stays out of it on purpose: no
@@ -52,7 +62,7 @@ add_library(aiws_app STATIC
     include/aiws/gui/corpus_build_job.hpp
 )
 target_include_directories(aiws_app PUBLIC include)
-target_link_libraries(aiws_app PUBLIC aiws_m2 Qt6::Widgets)
+target_link_libraries(aiws_app PUBLIC aiws_m2 aiws_ipc Qt6::Widgets)
 target_compile_options(aiws_app PRIVATE -Wall -Wextra -Wpedantic)
 
 # the app itself is now just main() + the library above
