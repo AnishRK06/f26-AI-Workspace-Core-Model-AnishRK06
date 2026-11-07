@@ -89,4 +89,8 @@ target_compile_options(student_tests PRIVATE -Wall -Wextra -Wpedantic)
 add_test(NAME student_tests COMMAND $<TARGET_FILE:student_tests>)
 set_tests_properties(student_tests PROPERTIES TIMEOUT 60 ENVIRONMENT QT_QPA_PLATFORM=offscreen)
 
-# CR-1: aiws_send gets added here once tools/aiws_send.cpp exists
+# CR-1: the second program. lives under tools/, not src/, and only needs the
+# wire format library - no Qt, no GUI, no backend
+add_executable(aiws_send tools/aiws_send.cpp)
+target_link_libraries(aiws_send PRIVATE aiws_ipc)
+target_compile_options(aiws_send PRIVATE -Wall -Wextra -Wpedantic)
