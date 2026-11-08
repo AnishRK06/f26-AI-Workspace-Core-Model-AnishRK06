@@ -1,4 +1,4 @@
-// Student-written M2 tests
+// Student-written tests (M2 backend + M4 responsive GUI + CR-1 remote add)
 //
 // Groups:
 //   1. default configuration still behaves like M1
@@ -6,6 +6,14 @@
 //   3. invalid configuration (null strategies)
 //   4. ownership / lifetime (destruction counting, move-only, moved-from)
 //   5. rebuild across responsibilities + failed-rebuild rollback
+//   6. M4 R1/R2: the build runs in the background, and a build that finishes
+//      after the workspace changed never becomes current
+//   7. M4 R3/R4: a failed build is reported, exit mid-build is quick, builds
+//      don't pile up
+//   8. CR-1 E1-E4: remote add through the real aiws_send and a raw client
+//
+// everything in 6-8 waits with a time limit, so a broken build fails here
+// within seconds instead of hanging until the 60 s ctest timeout
 
 #include "aiws/chunker.hpp"
 #include "aiws/chunking_strategy.hpp"
@@ -14,6 +22,24 @@
 #include "aiws/processing_core.hpp"
 #include "aiws/retrieval_engine.hpp"
 #include "aiws/retrieval_strategy.hpp"
+#include "aiws/gui/main_window.hpp"
+#include "aiws/ipc_protocol.hpp"
+
+#include <QApplication>
+#include <QElapsedTimer>
+#include <QFile>
+#include <QProcess>
+#include <QPushButton>
+#include <QTemporaryDir>
+#include <QTest>
+
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
+
+#include <chrono>
+#include <cstring>
+#include <thread>
 
 #include <cmath>
 #include <iostream>
@@ -470,9 +496,294 @@ void test_index_failure_after_chunking_keeps_corpus() {
           "index failure: chunks and index both unchanged (no early commit)");
 }
 
+
+// ---- M4 / CR-1 helpers ---------------------------------------------------
+
+using aiws::gui::MainWindow;
+
+// fails every build. the factory runs on the worker thread, so the throw
+// happens exactly where a real chunking failure would
+class FailingChunker final : public ChunkingStrategy {
+public:
+    std::vector<Chunk> chunk(const Document&, std::size_t) const override {
+        throw std::runtime_error("chunking failed on purpose");
+    }
+};
+
+// matches CorpusBuildJob::CoreFactory, ProcessingCore (*)()
+ProcessingCore failing_core() {
+    return ProcessingCore(std::make_unique<FailingChunker>(), std::make_unique<RetrievalEngine>(),
+                          std::make_unique<ContextBuilder>());
+}
+
+// tests make their own documents in a temp dir, so they don't depend on the
+// directory ctest happens to run in
+QString write_file(const QTemporaryDir& dir, const QString& name, const QByteArray& text) {
+    const QString path = dir.path() + "/" + name;
+    QFile f(path);
+    if (f.open(QIODevice::WriteOnly)) f.write(text);
+    return path;
+}
+
+QPushButton* find_button(MainWindow& w, const QString& text) {
+    for (QPushButton* b : w.findChildren<QPushButton*>()) {
+        if (b->text() == text) return b;
+    }
+    return nullptr;
+}
+
+void click(MainWindow& w, const QString& text) {
+    QPushButton* b = find_button(w, text);
+    check(b != nullptr, "button exists: " + text.toStdString());
+    if (b) b->click();
+}
+
+// spins the event loop (so the queued build_finished / remote add can run)
+// until the build is done. false = still building after ms
+bool wait_until_idle(MainWindow& w, int ms = 5000) {
+    return QTest::qWaitFor([&] { return !w.is_building(); }, ms);
+}
+
+bool wait_for_documents(MainWindow& w, std::size_t n, int ms = 3000) {
+    return QTest::qWaitFor([&] { return w.document_count() == n; }, ms);
+}
+
+// runs the real aiws_send from cwd and returns its exit code (-1 = didn't run)
+int run_aiws_send(const QStringList& args, const QString& cwd) {
+    QProcess p;
+    p.setWorkingDirectory(cwd);
+    p.start(AIWS_SEND_PATH, args);
+    if (!p.waitForFinished(10000) || p.exitStatus() != QProcess::NormalExit) return -1;
+    return p.exitCode();
+}
+
+// ---- 6. R1 / R2 ----------------------------------------------------------
+
+void test_build_runs_in_background() {
+    QTemporaryDir dir;
+    MainWindow w;
+    check(w.add_document_file(write_file(dir, "a.txt", "alpha beta gamma")), "R1: add a document");
+    w.set_build_delay_ms(400);
+
+    QElapsedTimer t;
+    t.start();
+    click(w, "Build Corpus");
+    check(t.elapsed() < 200, "R1: Build Corpus returns right away even with a 400 ms build");
+    check(w.is_building(), "R1: build is running after the click");
+    check(!find_button(w, "Build Corpus")->isEnabled(), "R1: one build at a time (Build disabled)");
+
+    check(wait_until_idle(w), "R1: build finishes");
+    check(w.is_corpus_current(), "R2: build of an unchanged workspace becomes current");
+}
+
+// the core R2 case (and what a stale-accepting build gets wrong): the build
+// started for one document, a second one is added before it finishes
+void test_add_during_build_discards_result() {
+    QTemporaryDir dir;
+    MainWindow w;
+    w.add_document_file(write_file(dir, "a.txt", "alpha beta"));
+    w.set_build_delay_ms(400);
+    click(w, "Build Corpus");
+
+    check(w.add_document_file(write_file(dir, "b.txt", "delta epsilon")), "R2: Add Document works during a build");
+    check(wait_until_idle(w), "R2: stale build still finishes");
+    check(!w.is_corpus_current(), "R2: build from before the add is NOT current");
+    check(find_button(w, "Build Corpus")->isEnabled(), "R2: can build again afterwards");
+
+    w.set_build_delay_ms(0);
+    click(w, "Build Corpus");
+    check(wait_until_idle(w) && w.is_corpus_current(), "R2: rebuilding the new workspace makes it current");
+}
+
+// same doc count before and after, so only a generation check catches it
+void test_reset_and_readd_during_build_discards_result() {
+    QTemporaryDir dir;
+    const QString a = write_file(dir, "a.txt", "alpha beta");
+    MainWindow w;
+    w.add_document_file(a);
+    w.set_build_delay_ms(400);
+    click(w, "Build Corpus");
+
+    click(w, "Reset");
+    w.add_document_file(a);
+    check(wait_until_idle(w), "R2: build finishes after Reset");
+    check(!w.is_corpus_current(), "R2: Reset + re-adding the same file still discards the old build");
+}
+
+void test_unreadable_add_changes_nothing() {
+    QTemporaryDir dir;
+    MainWindow w;
+    w.add_document_file(write_file(dir, "a.txt", "alpha"));
+    click(w, "Build Corpus");
+    wait_until_idle(w);
+
+    check(!w.add_document_file(dir.path() + "/missing.txt"), "add_document_file: false for an unreadable file");
+    check(w.document_count() == 1 && w.is_corpus_current(), "add_document_file: unreadable file changes nothing");
+}
+
+// ---- 7. R3 / R4 ----------------------------------------------------------
+
+void test_failed_build_is_reported() {
+    QTemporaryDir dir;
+    MainWindow w;
+    w.add_document_file(write_file(dir, "a.txt", "alpha"));
+    w.set_core_factory(&failing_core);
+    click(w, "Build Corpus");
+
+    check(wait_until_idle(w, 3000), "R3: a failed build leaves the building state");
+    check(!w.is_corpus_current(), "R3: failed build is not current");
+    check(find_button(w, "Build Corpus")->isEnabled(), "R3: Build is enabled again after a failure");
+
+    w.set_core_factory(nullptr);
+    click(w, "Build Corpus");
+    check(wait_until_idle(w) && w.is_corpus_current(), "R3: app still usable, next build works");
+}
+
+void test_exit_during_long_build_is_quick() {
+    QTemporaryDir dir;
+    QElapsedTimer t;
+    {
+        MainWindow w;
+        w.add_document_file(write_file(dir, "a.txt", "alpha"));
+        w.add_document_file(write_file(dir, "b.txt", "beta"));
+        w.set_build_delay_ms(10000);  // a 20 s build
+        click(w, "Build Corpus");
+        QTest::qWait(50);
+        t.start();
+    }  // ~MainWindow here, mid-build
+    check(t.elapsed() < 1000, "R4: destroying the window mid-build doesn't wait for the build");
+}
+
+void test_repeated_builds() {
+    QTemporaryDir dir;
+    MainWindow w;
+    w.add_document_file(write_file(dir, "a.txt", "alpha beta gamma"));
+    bool all_ok = true;
+    for (int i = 0; i < 20; ++i) {
+        click(w, "Build Corpus");
+        all_ok = all_ok && wait_until_idle(w, 3000) && w.is_corpus_current();
+    }
+    check(all_ok, "R4: 20 builds in a row each finish and become current");
+}
+
+// ---- 8. CR-1 -------------------------------------------------------------
+
+// E1 + relative path: aiws_send runs in dir, the app doesn't
+void test_remote_add_relative_path() {
+    QTemporaryDir dir;
+    write_file(dir, "notes.txt", "remote alpha");
+    const std::string sock = dir.path().toStdString() + "/s.sock";
+    MainWindow w;
+    check(w.start_remote_add(sock), "E1: server starts");
+
+    check(run_aiws_send({"--socket", QString::fromStdString(sock), "add", "notes.txt"}, dir.path()) == 0,
+          "E1: aiws_send exits 0 for a readable relative path");
+    check(wait_for_documents(w, 1), "E1: document added as if by Add Document");
+
+    click(w, "Build Corpus");
+    check(wait_until_idle(w) && w.is_corpus_current(), "E1: remotely added document builds");
+}
+
+// E1 + R2: a remote add during a build has the same effect as a local one
+void test_remote_add_during_build_discards_result() {
+    QTemporaryDir dir;
+    write_file(dir, "b.txt", "beta");
+    const std::string sock = dir.path().toStdString() + "/s.sock";
+    MainWindow w;
+    w.start_remote_add(sock);
+    w.add_document_file(write_file(dir, "a.txt", "alpha"));
+    w.set_build_delay_ms(400);
+    click(w, "Build Corpus");
+
+    check(run_aiws_send({"--socket", QString::fromStdString(sock), "add", "b.txt"}, dir.path()) == 0,
+          "E1/R2: remote add accepted during a build");
+    check(wait_for_documents(w, 2), "E1/R2: remote document added during the build");
+    check(wait_until_idle(w) && !w.is_corpus_current(), "E1/R2: build from before the remote add is NOT current");
+}
+
+void test_remote_add_unusual_paths() {
+    QTemporaryDir dir;
+    const std::string sock = dir.path().toStdString() + "/s.sock";
+    MainWindow w;
+    w.start_remote_add(sock);
+
+    const QString odd = QString::fromUtf8("my notes caf\xC3\xA9\nline two.txt");  // space, UTF-8, newline
+    write_file(dir, odd, "odd path words");
+    check(run_aiws_send({"--socket", QString::fromStdString(sock), "add", odd}, dir.path()) == 0,
+          "E2: path with a space, UTF-8 and a newline accepted");
+    check(wait_for_documents(w, 1), "E2: that document was added");
+}
+
+void test_remote_add_rejections() {
+    QTemporaryDir dir;
+    const QString sock = dir.path() + "/s.sock";
+    MainWindow w;
+    w.start_remote_add(sock.toStdString());
+
+    check(run_aiws_send({"--socket", sock, "add", "missing.txt"}, dir.path()) == 1, "E1: missing file -> exit 1");
+    check(run_aiws_send({"--socket", sock, "add", "."}, dir.path()) == 1, "E1: directory -> exit 1");
+    QTest::qWait(100);
+    check(w.document_count() == 0, "E1: rejected requests add nothing");
+
+    check(run_aiws_send({"--socket", dir.path() + "/nobody.sock", "add", "x.txt"}, dir.path()) == 2,
+          "exit 2: no app on that socket");
+}
+
+// E3: a hand-written client sends the request in three pieces with pauses.
+// sleeping here is fine: the server answers on its own thread
+void test_request_in_pieces() {
+    QTemporaryDir dir;
+    const std::string sock = dir.path().toStdString() + "/s.sock";
+    const std::string path = write_file(dir, "piece.txt", "split request").toStdString();
+    MainWindow w;
+    w.start_remote_add(sock);
+
+    const int fd = ::socket(AF_UNIX, SOCK_STREAM, 0);
+    sockaddr_un addr{};
+    addr.sun_family = AF_UNIX;
+    std::strncpy(addr.sun_path, sock.c_str(), sizeof(addr.sun_path) - 1);
+    const bool connected = ::connect(fd, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) == 0;
+    check(connected, "E3: raw client connects");
+
+    const std::string request = ipc::encode(ipc::kCommandAdd, path);
+    const std::size_t cuts[] = {0, 2, 7, request.size()};  // mid-header, mid-path, rest
+    for (int i = 0; i < 3 && connected; ++i) {
+        ::write(fd, request.data() + cuts[i], cuts[i + 1] - cuts[i]);
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    }
+
+    unsigned char header[ipc::kHeaderBytes] = {0xFF};
+    const auto deadline = ipc::Clock::now() + std::chrono::seconds(3);
+    const bool replied = connected && ipc::read_exact(fd, header, sizeof(header), deadline);
+    ::close(fd);
+    check(replied && header[0] == ipc::kStatusAccepted, "E3: split request accepted");
+    check(wait_for_documents(w, 1), "E3: split request added the document");
+}
+
+// E4: the window going away (what happens after Exit is confirmed) stops the
+// server quickly and removes its socket file
+void test_exit_stops_server() {
+    QTemporaryDir dir;
+    const QString sock = dir.path() + "/s.sock";
+    QElapsedTimer t;
+    {
+        MainWindow w;
+        w.start_remote_add(sock.toStdString());
+        check(QFile::exists(sock), "E4: socket file exists while running");
+        t.start();
+    }
+    check(t.elapsed() < 500, "E4: stops serving within 500 ms");
+    check(!QFile::exists(sock), "E4: socket file removed");
+    check(run_aiws_send({"--socket", sock, "add", "x.txt"}, dir.path()) == 2, "E4: nothing answers afterwards");
+}
+
 }  // namespace
 
-int main() {
+// QApplication: the M4/CR-1 tests create MainWindows and need an event loop
+// for the queued build_finished / remote add calls. offscreen comes from ctest
+int main(int argc, char* argv[]) {
+    QApplication app(argc, argv);
+
     test_default_matches_help_session_trace();
     test_default_edge_cases();
     test_each_operation_dispatches_to_injected_strategy();
@@ -487,10 +798,25 @@ int main() {
     test_strategy_exception_mid_rebuild_keeps_corpus();
     test_index_failure_after_chunking_keeps_corpus();
 
+    test_build_runs_in_background();
+    test_add_during_build_discards_result();
+    test_reset_and_readd_during_build_discards_result();
+    test_unreadable_add_changes_nothing();
+    test_failed_build_is_reported();
+    test_exit_during_long_build_is_quick();
+    test_repeated_builds();
+
+    test_remote_add_relative_path();
+    test_remote_add_during_build_discards_result();
+    test_remote_add_unusual_paths();
+    test_remote_add_rejections();
+    test_request_in_pieces();
+    test_exit_stops_server();
+
     if (failures) {
         std::cerr << failures << " of " << checks << " checks failed\n";
         return 1;
     }
-    std::cout << "M2 student tests passed (" << checks << " checks)\n";
+    std::cout << "student tests passed (" << checks << " checks)\n";
     return 0;
 }

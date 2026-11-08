@@ -81,6 +81,12 @@ target_link_libraries(public_tests PRIVATE aiws_m2)
 target_compile_options(public_tests PRIVATE -Wall -Wextra -Wpedantic)
 add_test(NAME public_tests COMMAND $<TARGET_FILE:public_tests>)
 
+# CR-1: the second program. lives under tools/, not src/, and only needs the
+# wire format library - no Qt, no GUI, no backend
+add_executable(aiws_send tools/aiws_send.cpp)
+target_link_libraries(aiws_send PRIVATE aiws_ipc)
+target_compile_options(aiws_send PRIVATE -Wall -Wextra -Wpedantic)
+
 # student tests. links aiws_app (not just aiws_m2) so it can drive MainWindow
 # through add_document_file() and its buttons. has to pass on the normal build
 # and fail within 60 s on each fault build, hence the TIMEOUT. offscreen so it
@@ -91,8 +97,7 @@ target_compile_options(student_tests PRIVATE -Wall -Wextra -Wpedantic)
 add_test(NAME student_tests COMMAND $<TARGET_FILE:student_tests>)
 set_tests_properties(student_tests PROPERTIES TIMEOUT 60 ENVIRONMENT QT_QPA_PLATFORM=offscreen)
 
-# CR-1: the second program. lives under tools/, not src/, and only needs the
-# wire format library - no Qt, no GUI, no backend
-add_executable(aiws_send tools/aiws_send.cpp)
-target_link_libraries(aiws_send PRIVATE aiws_ipc)
-target_compile_options(aiws_send PRIVATE -Wall -Wextra -Wpedantic)
+# the CR-1 tests run the real aiws_send, so build it first and tell the tests
+# where it ended up
+add_dependencies(student_tests aiws_send)
+target_compile_definitions(student_tests PRIVATE AIWS_SEND_PATH="$<TARGET_FILE:aiws_send>")

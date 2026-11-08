@@ -7,6 +7,7 @@
 #include "aiws/processing_core.hpp"
 #include "aiws/workspace.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -85,6 +86,9 @@ public:
 
     /** @brief True from Build Corpus until build_finished() handles the result. */
     bool is_building() const noexcept;
+
+    /** @brief Number of documents in the Workspace (lets tests see a remote add land). */
+    std::size_t document_count() const noexcept;
 
     /**
      * @brief CR-1: starts accepting aiws_send requests on socket_path.

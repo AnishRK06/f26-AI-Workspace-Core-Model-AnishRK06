@@ -155,6 +155,8 @@ bool MainWindow::is_corpus_current() const noexcept { return corpus_current_; }
 
 bool MainWindow::is_building() const noexcept { return build_job_ != nullptr; }
 
+std::size_t MainWindow::document_count() const noexcept { return workspace_.documents().size(); }
+
 // the dialog is the only part that's specific to the button. everything else
 // is add_document_file, so the button, the tests and CR-1 all add the same way
 void MainWindow::add_document() {
