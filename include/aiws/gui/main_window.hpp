@@ -2,8 +2,14 @@
 
 #include <QMainWindow>
 
+#include "aiws/gui/corpus_build_job.hpp"
+#include "aiws/gui/ipc_server.hpp"
 #include "aiws/processing_core.hpp"
 #include "aiws/workspace.hpp"
+
+#include <cstdint>
+#include <memory>
+#include <string>
 
 class QLabel;
 class QPushButton;
@@ -50,6 +56,41 @@ public:
      * callback means that an Exit request has no registered callback to invoke.
      */
     void set_exit_callback(ExitCallback callback) noexcept;
+
+    // ---- M4 required public API (see specification, Section 5) ----------
+
+    /**
+     * @brief Adds the file at path exactly as the Add Document action does.
+     * @return false, changing nothing, if the file cannot be read.
+     */
+    bool add_document_file(const QString& path);
+
+    /**
+     * @brief Sets the extra build time per document for builds started after this call.
+     * @param ms_per_document Delay in milliseconds (the --build-delay-ms value).
+     */
+    void set_build_delay_ms(int ms_per_document);
+
+    // ---- M4 additions (my design) -----------------------------------------
+
+    /**
+     * @brief Sets what makes the core each later build fills in. Test hook.
+     * @param factory Null means the default ProcessingCore. Tests pass one whose
+     * chunking strategy throws, so they can check that a failed build is reported.
+     */
+    void set_core_factory(CorpusBuildJob::CoreFactory factory) noexcept;
+
+    /** @brief True while Search, Term Inspector and Context may use the corpus. */
+    bool is_corpus_current() const noexcept;
+
+    /** @brief True from Build Corpus until build_finished() handles the result. */
+    bool is_building() const noexcept;
+
+    /**
+     * @brief CR-1: starts accepting aiws_send requests on socket_path.
+     * @return false (with the reason in the status line) if the socket can't be set up.
+     */
+    bool start_remote_add(const std::string& socket_path);
 
 private slots:
     /** @brief Handles a request to select and add a document to the workspace. */
@@ -106,6 +147,20 @@ private slots:
      */
     void exit_application();
 
+    /**
+     * @brief Takes the finished build's result and decides whether it becomes current.
+     *
+     * Invoked (queued) by the CorpusBuildJob once its result is ready, so it
+     * always runs on the GUI thread.
+     */
+    void build_finished();
+
+    /**
+     * @brief CR-1: adds a path received by the IpcServer, exactly like Add Document.
+     * @param path Absolute path sent by aiws_send. Invoked (queued) by the server thread.
+     */
+    void remote_add_requested(const QString& path);
+
 private:
     /**
      * @brief Updates availability of actions that depend on current application state.
@@ -129,6 +184,18 @@ private:
     ProcessingCore processing_core_;
     bool corpus_current_{false};
     ExitCallback exit_callback_{nullptr};
+
+    // goes up on every Add Document and Reset. a finished build only becomes
+    // current if it was started for the generation we're still on
+    std::uint64_t build_generation_{0};
+    int build_delay_ms_{0};
+    CorpusBuildJob::CoreFactory core_factory_{nullptr};
+
+    // at most one build at a time. null when nothing is building. declared
+    // after workspace_ and processing_core_, so they're destroyed in the
+    // opposite order: both threads are joined before anything else goes
+    std::unique_ptr<CorpusBuildJob> build_job_;
+    std::unique_ptr<IpcServer> ipc_server_;
 
     WorkspaceWidget* workspace_widget_{nullptr};
     SearchWidget* search_widget_{nullptr};

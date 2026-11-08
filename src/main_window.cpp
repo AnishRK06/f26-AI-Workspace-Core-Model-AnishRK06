@@ -147,18 +147,33 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
 void MainWindow::set_exit_callback(ExitCallback callback) noexcept { exit_callback_ = callback; }
 
-// the Workspace changes here, so this is more than a list update: the old
-// corpus no longer matches and has to be invalidated
+void MainWindow::set_build_delay_ms(int ms_per_document) { build_delay_ms_ = ms_per_document; }
+
+void MainWindow::set_core_factory(CorpusBuildJob::CoreFactory factory) noexcept { core_factory_ = factory; }
+
+bool MainWindow::is_corpus_current() const noexcept { return corpus_current_; }
+
+bool MainWindow::is_building() const noexcept { return build_job_ != nullptr; }
+
+// the dialog is the only part that's specific to the button. everything else
+// is add_document_file, so the button, the tests and CR-1 all add the same way
 void MainWindow::add_document() {
     const QString path = QFileDialog::getOpenFileName(this, "Add Document", QString(),
                                                       "Text files (*.txt);;All files (*)");
     if (path.isEmpty()) return;  // cancelled: change nothing
 
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+    // add_document_file changes nothing on an unreadable file, not even the
+    // status line, so the button reports that one itself
+    if (!add_document_file(path) && !QFileInfo(path).isReadable()) {
         status_label_->setText("Could not open " + path);
-        return;
     }
+}
+
+// the Workspace changes here, so this is more than a list update: the old
+// corpus no longer matches and has to be invalidated
+bool MainWindow::add_document_file(const QString& path) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) return false;
     const QString text = QString::fromUtf8(file.readAll());
 
     // id = absolute path, title = file name, per the spec
@@ -170,31 +185,84 @@ void MainWindow::add_document() {
             Document(info.absoluteFilePath().toStdString(), title.toStdString(), text.toStdString()));
     } catch (const std::exception& e) {
         status_label_->setText(QString("Could not add %1: %2").arg(title, e.what()));
-        return;
+        return false;
     }
+
+    // R2: a build that's running right now was started for the old workspace.
+    // bumping the generation is what makes build_finished() throw it away
+    ++build_generation_;
 
     workspace_widget_->add_document(title);
     invalidate_corpus();
     status_label_->setText("Added " + title + ". Build Corpus to process the workspace.");
+    return true;
 }
 
 // always an explicit user request, adding a document never rebuilds on its own.
-// rebuild is all-or-nothing on the backend side, so on a throw the old corpus
-// is untouched, but it still isn't current for this workspace
+// M4: the build runs on a CorpusBuildJob's thread, so this returns right away
+// and the GUI stays usable (R1). the job gets a copy of the workspace, never
+// workspace_ itself. one build at a time: Build Corpus is disabled until
+// build_finished() has handled the running one
 void MainWindow::build_corpus() {
-    if (workspace_.documents().empty()) return;
+    if (workspace_.documents().empty() || build_job_) return;
 
+    // if the corpus is current it stays usable while this runs: the workspace
+    // hasn't changed, so the old corpus still matches it
+    build_job_ = std::make_unique<CorpusBuildJob>(workspace_, build_delay_ms_, build_generation_, this,
+                                                  "build_finished", core_factory_);
+
+    workspace_widget_->set_corpus_status("Building...");
+    status_label_->setText("Building corpus...");
+    update_action_states();
+}
+
+// runs on the GUI thread, queued by the job once its result is in the future.
+// the one place that decides whether a finished build becomes current (R2)
+void MainWindow::build_finished() {
+    if (!build_job_) return;
+
+    // valid only if nothing changed the workspace since the build started.
+    // a generation number, not a doc count: Reset + re-adding the same files
+    // gives the same count but is still a different workspace
+#ifdef AIWS_FAULT_ACCEPT_STALE
+    const bool still_current = true;  // fault: accepts a build from an old workspace
+#else
+    const bool still_current = build_job_->generation() == build_generation_;
+#endif
+
+    ProcessingCore built;
+    bool failed = false;
+    QString reason;
     try {
-        processing_core_.rebuild(workspace_);
+        built = build_job_->take_result();
     } catch (const std::exception& e) {
+        failed = true;
+        reason = e.what();
+    }
+
+    // joins the worker. it already filled the promise and posted this call,
+    // so all that's left of it is returning: the join doesn't block the GUI
+    build_job_.reset();
+
+    if (!still_current) {
+        // built (or failed) for a workspace that no longer exists. not shown
+        invalidate_corpus();
+        status_label_->setText("Workspace changed during the build, so it was discarded. Build Corpus again.");
+        return;
+    }
+
+    if (failed) {
+        // R3: reported, and the app stays usable (Build is enabled again)
         corpus_current_ = false;
         clear_processing_outputs();
         workspace_widget_->set_corpus_status("Build failed");
-        status_label_->setText(QString("Build Corpus failed: %1").arg(e.what()));
+        status_label_->setText(QString("Build Corpus failed: %1").arg(reason));
         update_action_states();
         return;
     }
 
+    // the old core is destroyed here, on the GUI thread
+    processing_core_ = std::move(built);
     corpus_current_ = true;
     clear_processing_outputs();
     const auto chunks = static_cast<qulonglong>(processing_core_.chunk_count());
@@ -309,6 +377,10 @@ void MainWindow::reset_application() {
                                       context_widget_};
     for (Resettable* c : components) c->reset();
 
+    // a running build was started for the workspace we're about to clear.
+    // it keeps running on its own copy, and build_finished() throws it away
+    ++build_generation_;
+
     // a fresh core drops the old corpus entirely. ProcessingCore is move-only,
     // so this is a move assignment from a temporary
     workspace_.clear();
@@ -325,13 +397,34 @@ void MainWindow::exit_application() {
     if (exit_callback_) exit_callback_(this);
 }
 
+// CR-1. the server binds right away, so a bad path is reported here instead of
+// failing later on its thread. it lives as long as the window: ~MainWindow
+// destroys it, which stops it and removes the socket file (E4)
+bool MainWindow::start_remote_add(const std::string& socket_path) {
+    try {
+        ipc_server_ = std::make_unique<IpcServer>(socket_path, this, "remote_add_requested");
+    } catch (const std::exception& e) {
+        status_label_->setText(QString("Remote add unavailable: %1").arg(e.what()));
+        return false;
+    }
+    return true;
+}
+
+// queued from the server thread, so this runs on the GUI thread like any
+// other click. E1: same function as Add Document, so a remote add during a
+// build bumps the generation and invalidates exactly the same way (R2)
+void MainWindow::remote_add_requested(const QString& path) {
+    if (!add_document_file(path)) status_label_->setText("Remote add failed: could not open " + path);
+}
+
 // the one place that decides availability. called after every state change
 // so the buttons can never disagree with corpus_current_ or the workspace
 void MainWindow::update_action_states() {
     const bool has_documents = !workspace_.documents().empty();
     const bool has_query = search_widget_->has_query();
 
-    workspace_widget_->set_build_corpus_enabled(has_documents);
+    // one build at a time (R4: builds can't pile up threads)
+    workspace_widget_->set_build_corpus_enabled(has_documents && !build_job_);
     search_widget_->set_search_enabled(corpus_current_ && has_query);
     term_inspector_widget_->set_inspection_enabled(corpus_current_);
     context_widget_->set_build_context_enabled(corpus_current_ && has_query);
