@@ -54,7 +54,7 @@ The length prefix handles E2 without escaping, and `read_exact()` handles E3. `s
 ## AI Use Disclosure
 
 I used AI as an assistant to review the M4 requirements, talk through design decisions, and help debug parts of my implementation and tests. I reviewed and edited all of the submitted code myself, then built and tested it on my own to confirm it works as intended.
-
+I used Claude (Anthropic) to help write up our pair programming log. I gave it the session details from Mustaali's and my sessions, including dates, times, driver/navigator roles, what we worked on, and each person's navigator contributions. Claude reworded the log from my perspective, updated the Session 2 timing to 9:40 PM–10:20 PM, and formatted it in Markdown. All of the session content, timing, and contributions came from Mustaali and me, and I reviewed the final version for accuracy.
 ---
 
 ## Pair programming log
@@ -63,6 +63,8 @@ I used AI as an assistant to review the M4 requirements, talk through design dec
 
 **Session 1: November 6, 2026, 9:15 AM–10:00 AM.** We worked on Mustaali's M4 code, mainly the background build, stale-generation handling, and CR-1 remote add behavior. Mustaali drove from 9:15 AM to 9:40 AM, walking through `build_corpus()`, `run_build()`, `build_finished()`, and how Workspace changes invalidate a running build. We swapped roles at 9:40 AM, and I drove from 9:40 AM to 10:00 AM while Mustaali navigated through the related tests and fault behavior. My navigator contribution was reviewing the stale-build path and reminding Mustaali that a remote add during an active build needed to invalidate the old build the same way a GUI add does.
 
-**Session 2: November 6, 2026, 10:15 AM–11:00 AM.** We worked on my M4 code, mainly my background-build and CR-1 integration. I drove from 10:15 AM to 10:20 AM while Mustaali navigated and reviewed the thread lifecycle, generation checking, and stale-result handling. We swapped roles at 10:20 AM, and Mustaali drove from 10:20 AM to 11:00 AM while we reviewed my tests and integration behavior. Mustaali's navigator contribution was pointing out that I needed to handle and test the case where the Workspace changes while a corpus build is still running.
+**Session 2: November 6, 2026, 9:40 PM–10:20 PM.** We worked on my M4 code, mainly my background-build and CR-1 integration. I drove from 9:40 PM to 10:00 PM while Mustaali navigated and reviewed the thread lifecycle, generation checking, and stale-result handling. We swapped roles at 10:00 PM, and Mustaali drove from 10:00 PM to 10:20 PM while we reviewed my tests and integration behavior. Mustaali's navigator contribution was pointing out that I needed to handle and test the case where the Workspace changes while a corpus build is still running.
+
+The interaction that worked best for us was having the driver explain each change while the navigator followed the control flow and called out edge cases before moving on.
 
 The interaction that worked best for us was having the driver explain each change while the navigator followed the control flow and called out edge cases before moving on.
