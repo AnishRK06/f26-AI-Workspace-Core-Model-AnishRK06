@@ -1,93 +1,68 @@
-# M2 Technical & Design Understanding
+# M4 Decision Record
 
-This file is an assessed technical-understanding artifact, not ordinary project documentation.
-Answer all four questions using your own submitted implementation. Concise answers are acceptable when they are technically correct and specific.
+## 1. Threads and ownership
 
-Generic descriptions of C++ concepts or restatements of the assignment that do not identify and explain corresponding parts of your code will receive limited credit.
+| Thread | Runs |
+|---|---|
+| GUI | every `MainWindow` slot and widget; `CorpusBuildJob` and `IpcServer` construction/destruction, `take_result()`, `stop()` |
+| Build worker (`CorpusBuildJob::worker_`) | `CorpusBuildJob::run()` |
+| IPC worker (`IpcServer::worker_`) | `IpcServer::run()`, `serve_client()` |
 
-## 1. Polymorphism and dynamic dispatch - 1.5 points
+`MainWindow` owns `build_job_` and `ipc_server_` (`std::unique_ptr`). `~CorpusBuildJob` sets `cancel_` and joins, and `IpcServer::stop()` sets `stop_`, joins and unlinks the socket. So `~MainWindow` joins both threads, and nothing is detached. **A built corpus** is created in `run()`, moved into `promise_`, taken by `build_finished()` through `take_result()`, then moved into `processing_core_` or destroyed, both on the GUI thread.
 
-Identify one place in your M2 implementation where runtime polymorphism occurs. Name the relevant base interface, derived implementation, and `ProcessingCore` function involved. Trace the call from `ProcessingCore` to the selected strategy implementation and explain why the derived implementation is invoked.
+**Constraint 5:**
 
-Then explain what would change if the relevant operation were not declared `virtual`.
+| Data | Writer | Reader | Safe because |
+|---|---|---|---|
+| `CorpusBuildJob::cancel_` | GUI | build worker | `std::atomic<bool>` |
+| `IpcServer::stop_` | GUI | IPC worker | `std::atomic<bool>` |
+| `promise_`/`future_` state | build worker | GUI | the standard library synchronizes it, and `build_finished()` is posted after the promise is set, so `get()` never blocks |
 
-Where it happens: `ProcessingCore::search` in `src/processing_core.cpp`.
-- Base interface: `RetrievalStrategy`
-- Derived implementation: `RetrievalEngine` (the default)
-- `ProcessingCore` function: `search`
+Everything else a worker uses is a copy (the `workspace_` snapshot) or set before the thread starts and never changed.
 
-Call trace:
-1. The default constructor creates `std::make_unique<RetrievalEngine>()` and stores it in `Impl::retrieval`, which has type `std::unique_ptr<RetrievalStrategy>`.
-2. `core.search(query, k)` runs `impl_->retrieval->search(query, k, impl_->chunks, impl_->index)`.
-3. `search` is declared `virtual ... = 0` in `RetrievalStrategy`, and `RetrievalEngine::search` is marked `override`. The pointer's type is the base, but the object is a `RetrievalEngine`. The virtual call is resolved at runtime using the object's real type, so `RetrievalEngine::search` runs.
+## 2. How a finished build is judged valid
 
-If a different strategy is injected (for example `ReverseRetrieval` in my tests), the same line runs that class's `search` instead. `ProcessingCore` never names the concrete class.
+`add_document_file()` and `reset_application()` increment `build_generation_`. `build_finished()` accepts a result only if `job->generation() == build_generation_`. Otherwise it calls `invalidate_corpus()` and drops the result. No failure is shown, just a "discarded" status line. A document count wouldn't work, because Reset plus re-adding the same file gives the same count.
 
-If `search` were not virtual: the call would be decided at compile time from the pointer's type, `RetrievalStrategy`. It would always call the base version and ignore the injected strategy, so runtime substitution would not work. Also, `override` in `RetrievalEngine` would fail to compile, because there would be no virtual function to override.
+## 3. Changes since the checkpoint
 
-## 2. Ownership and lifetime - 1.5 points
+- Add and Reset no longer cancel the build. A cancelled build became an exception and skipped the generation check, which hid the stale-accept fault. Cancel is now only used on exit.
+- Added `CoreFactory` / `set_core_factory()`, so tests can make a build fail.
+- Build Corpus is disabled while a build runs (FAQ decision).
+- `add_document()` now just opens the dialog and calls `add_document_file()`. Added `is_corpus_current()`, `is_building()` and `document_count()` for tests.
 
-Identify where one of the strategy objects is created, where ownership is transferred, and which object ultimately owns it. Explain how `std::unique_ptr` represents that ownership relationship and when the strategy object is destroyed.
+## 4. CR-1 impact
 
-Also explain why `ProcessingCore` is move-only and why the strategy base classes require virtual destructors.
+New: `ipc_protocol`, `IpcServer`, `tools/aiws_send.cpp`, `start_remote_add()`, `remote_add_requested()`, and `--ipc-socket`. The build path is unchanged: `remote_add_requested()` calls `add_document_file()`, so R2 applies as is.
 
-Example: the default `RetrievalEngine`.
-- Created: in the `ProcessingCore()` default constructor, with `std::make_unique<RetrievalEngine>()`.
-- Transferred: that `unique_ptr` is moved into `Impl`'s constructor, which moves it into the `Impl::retrieval` member. For injected strategies, the caller writes `std::move(ptr)` into the configurable constructor. The parameter takes ownership, and the caller's pointer becomes null (checked in `test_core_owns_and_destroys_strategies_once`).
-- Final owner: `ProcessingCore` owns `Impl` through `impl_`, and `Impl` owns the strategy through `std::unique_ptr<RetrievalStrategy> retrieval`.
-- How `unique_ptr` represents it: `unique_ptr` means exactly one owner. It can't be copied, only moved, and it deletes the object automatically.
-- When destroyed: when the `ProcessingCore` is destroyed. Its destructor destroys `impl_`, which destroys the three `unique_ptr`s, which delete the strategies. My test counts this and sees exactly 3 destructions only after the core goes out of scope.
+| | Byte 0 | Bytes 1-4 (big-endian) | Then |
+|---|---|---|---|
+| Request | `0x01` add | N (1-65536) | N bytes of UTF-8 absolute path |
+| Reply | `0x00` ok / `0x01` rejected | M | M bytes of UTF-8 reason |
 
-Why `ProcessingCore` is move-only: it holds `unique_ptr`s, which can't be copied. A copy would mean two cores owning the same strategy, which would delete it twice. Copying would also require cloning a polymorphic object whose real type the core doesn't know. So copy is deleted, and a move just transfers `impl_` to the new core.
+The length prefix handles E2 without escaping, and `read_exact()` handles E3. `serve_client()` checks the file itself (`open` + `S_ISREG`), posts the path with a queued `invokeMethod`, then replies, so it never waits for the GUI. Waits are `poll()` calls of at most 100 ms that check `stop_` (E4). Bad `aiws_send` usage exits 1.
 
-Why virtual destructors: the core deletes strategies through a base pointer (`unique_ptr<RetrievalStrategy>`). Without a virtual destructor, only the base destructor would run, the derived part would not be cleaned up, and the behavior is undefined. With it, the derived destructor runs first, then the base destructor.
+## 5. Fault switches
 
+| Macro | Location | Caught by |
+|---|---|---|
+| `AIWS_FAULT_ACCEPT_STALE` | `MainWindow::build_finished()` | `test_add_during_build_discards_result`, `test_reset_and_readd_during_build_discards_result`, `test_remote_add_during_build_discards_result` |
+| `AIWS_FAULT_LOSE_FAILURE` | `catch` in `CorpusBuildJob::run()` | `test_failed_build_is_reported` |
 
-## 3. Architecture, extensibility, and M1 compatibility - 1.5 points
+## 6. AI-use disclosure
 
-Explain one specific architectural decision in your M2 implementation that makes the processing system extensible while preserving M1 behavior.
+## AI Use Disclosure
 
-Identify the classes or interfaces involved and explain both:
-- how the default configuration preserves M1 behavior; and
-- how a different implementation can be substituted without changing the normal `ProcessingCore` API.
+I used AI as an assistant to review the M4 requirements, talk through design decisions, and help debug parts of my implementation and tests. I reviewed and edited all of the submitted code myself, then built and tested it on my own to confirm it works as intended.
 
-Include one plausible design alternative and explain why the M2 design is preferable for this milestone. The alternative does not need to be something you actually implemented.
+---
 
-Decision: `ProcessingCore::Impl` stores each processing role as a `std::unique_ptr` to its interface (`ChunkingStrategy`, `RetrievalStrategy`, `ContextStrategy`) instead of a concrete M1 object. `rebuild`, `search`, and `build_context` call through those pointers.
+## Pair programming log
 
-How the default preserves M1: the default constructor installs the same M1 classes M1 used: `Chunker` with the M1 policy (120 / 20 / 20), `RetrievalEngine`, and `ContextBuilder`. Their algorithms were not changed, so the output is the same as M1. My test `test_default_matches_help_session_trace` checks the help-session example, including score `2.962461898616` and truncated context `"search search 42"`.
+<!-- TODO (you): fill in from your real sessions. -->
 
-How a different implementation is substituted: a caller writes a class that derives from one of the interfaces and passes it to the second constructor. `search`, `rebuild`, and `build_context` keep exactly the same signatures, so the caller uses the same API and only the object behind the pointer changes.
+**Session 1: November 6, 2026, 9:15 AM–10:00 AM.** We worked on Mustaali's M4 code, mainly the background build, stale-generation handling, and CR-1 remote add behavior. Mustaali drove from 9:15 AM to 9:40 AM, walking through `build_corpus()`, `run_build()`, `build_finished()`, and how Workspace changes invalidate a running build. We swapped roles at 9:40 AM, and I drove from 9:40 AM to 10:00 AM while Mustaali navigated through the related tests and fault behavior. My navigator contribution was reviewing the stale-build path and reminding Mustaali that a remote add during an active build needed to invalidate the old build the same way a GUI add does.
 
-Alternative: use an enum (like `RetrievalMode::TfIdf`) and a `switch` inside `ProcessingCore::search`.
+**Session 2: November 6, 2026, 10:15 AM–11:00 AM.** We worked on my M4 code, mainly my background-build and CR-1 integration. I drove from 10:15 AM to 10:20 AM while Mustaali navigated and reviewed the thread lifecycle, generation checking, and stale-result handling. We swapped roles at 10:20 AM, and Mustaali drove from 10:20 AM to 11:00 AM while we reviewed my tests and integration behavior. Mustaali's navigator contribution was pointing out that I needed to handle and test the case where the Workspace changes while a corpus build is still running.
 
-Why M2's design is better: with the enum, every new algorithm requires editing `ProcessingCore`, and outside code like instructor tests can't add its own strategy at all. With interfaces, new strategies can be added without touching `ProcessingCore`.
-
-## 4. Testing and defect reasoning - 1.5 points
-
-Select one meaningful test from your `tests/student_tests.cpp`.
-
-Explain:
-- what M2 requirement the test validates;
-- what specific implementation defect the test could detect; and
-- why your test provides useful evidence beyond simply rerunning the supplied public tests.
-
-If your test uses a custom strategy, explain how its observable behavior demonstrates that `ProcessingCore` is actually using runtime substitution.
-
-Test: `test_each_operation_dispatches_to_injected_strategy`
-
-Requirement validated: `ProcessingCore` must actually use the injected strategy for each operation:
-- `rebuild` uses the chunking strategy
-- `search` uses the retrieval strategy
-- `build_context` uses the retrieval strategy and then the context strategy
-
-Defect it can detect: `ProcessingCore` declaring the interfaces but still calling the M1 classes directly, for example `search` doing `RetrievalEngine{}.search(...)` instead of `impl_->retrieval->search(...)`. It also catches arguments like `k` or `token_budget` not being passed through.
-
-How the custom strategies prove substitution: the test injects three custom strategies whose output the M1 code could never produce:
-- `MarkerChunker` makes chunk ids ending in `#m`.
-- `ReverseRetrieval` returns `c#m` then `b#m` for the query `"alpha"`. The default engine would return `a` then `b`, and document `c` doesn't even contain "alpha".
-- `TagContext` returns text like `"ctx:c#m"`.
-
-They also share a `Probe` object that counts calls and records `k` and the budget. If the core called the default classes, both the outputs and the counts would be wrong.
-
-Why it's more useful than the public tests: the public test checks one output per strategy from a single construction. My test also checks how many times each strategy is called and with what arguments. Other tests check that injected strategies keep working after moves and after a failed rebuild.
+The interaction that worked best for us was having the driver explain each change while the navigator followed the control flow and called out edge cases before moving on.
