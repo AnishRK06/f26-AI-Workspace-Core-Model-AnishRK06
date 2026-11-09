@@ -1,0 +1,444 @@
+commit 775b09f8a27d167852ffc9086b1eaace5cdd1a8f
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-11-08 22:39:39 -0500
+
+    M4: update wrong session log
+
+ DESIGN.md | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+commit a83f3962c74287e50917efac2515dd3a1a865d0e
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-11-08 22:28:09 -0500
+
+    M4: Design
+
+ DESIGN.md | 111 ++++++++++++++++++++++++--------------------------------------
+ 1 file changed, 43 insertions(+), 68 deletions(-)
+
+commit cb939abaf1b89d6254ae1d9395be75d60a2745df
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-11-07 21:26:10 -0500
+
+    M4: tests
+
+ CMakeLists.txt                   |  15 +-
+ include/aiws/gui/main_window.hpp |   4 +
+ src/main_window.cpp              |   2 +
+ tests/student_tests.cpp          | 332 ++++++++++++++++++++++++++++++++++++++-
+ 4 files changed, 345 insertions(+), 8 deletions(-)
+
+commit d545d07ea1312a22b2ebbd6428711461deaf2af9
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-11-07 20:22:23 -0500
+
+    M4: --build-delay-ms and --ipc-socket in main
+
+ src/main.cpp | 67 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 66 insertions(+), 1 deletion(-)
+
+commit 4cdebfe6b921655201da84e9c2e41bc2da293b9d
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-11-07 19:31:14 -0500
+
+    background build in MainWindow and remote add slot
+
+ include/aiws/gui/main_window.hpp |  67 ++++++++++++++++++++++
+ src/main_window.cpp              | 117 +++++++++++++++++++++++++++++++++++----
+ 2 files changed, 172 insertions(+), 12 deletions(-)
+
+commit 0820ed82f7145ac0ca99e4545bb4ed21acb40318
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-11-07 17:06:17 -0500
+
+    M4: implemented CorpusBuildJob
+
+ src/corpus_build_job.cpp | 85 ++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 85 insertions(+)
+
+commit 607f01d6200f995d9fd376296f684f7be9ab90bc
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-11-07 01:16:41 -0500
+
+    CR-1: added IpcServer
+
+ CMakeLists.txt                  |   2 +
+ include/aiws/gui/ipc_server.hpp |  66 ++++++++++++++++
+ src/ipc_server.cpp              | 170 ++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 238 insertions(+)
+
+commit 0afa1d82714bcd55013708a52ec4b948a2394a63
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-11-06 23:32:27 -0500
+
+    CR-1: added aiws_send client
+
+ CMakeLists.txt      |   6 +-
+ tools/aiws_send.cpp | 160 ++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 165 insertions(+), 1 deletion(-)
+
+commit a4869849922433f37913bd2a5b7d04a3c47b7764
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-11-06 22:24:56 -0500
+
+    M4: build job header + CR-1 IPC protocol(PP)
+
+ CMakeLists.txt                        |  12 +++-
+ include/aiws/gui/corpus_build_job.hpp |  84 ++++++++++++++++++++++++++
+ include/aiws/ipc_protocol.hpp         |  75 ++++++++++++++++++++++++
+ src/ipc_protocol.cpp                  | 107 ++++++++++++++++++++++++++++++++++
+ 4 files changed, 277 insertions(+), 1 deletion(-)
+
+commit 2a19f82166f5f3fc2a8bc514817e4b8a6e790c8a
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-11-06 15:29:39 -0500
+
+    m4 cmake
+
+ CMakeLists.txt | 59 ++++++++++++++++++++++++++++++++++++++--------------------
+ 1 file changed, 39 insertions(+), 20 deletions(-)
+
+commit 5e1ffd35258556f5c8c1446b964d55bd504c4966
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-10-28 22:58:44 -0400
+
+    M4 design
+
+ DESIGN_NOTE.md | 79 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 79 insertions(+)
+
+commit afa210ac668c4d4f0e4fce30e1b0b032a2530c73
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-10-24 19:29:12 -0400
+
+    M3 submission
+
+ src/main.cpp        |  28 ++++-
+ src/main_window.cpp | 341 +++++++++++++++++++++++++++++++++++++++++++++++-----
+ 2 files changed, 334 insertions(+), 35 deletions(-)
+
+commit 19552f4342a3a58766fea6d060117e9c4365229e
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-10-23 18:50:32 -0400
+
+    implemented ContextWidget
+
+ src/context_widget.cpp | 122 ++++++++++++++++++++++++++++++++++++++++---------
+ 1 file changed, 101 insertions(+), 21 deletions(-)
+
+commit d3696dddff1a17180b8b89b7f5b0a56a4f800202
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-10-23 02:51:21 -0400
+
+    implemented TermInspectorWidget
+
+ src/term_inspector_widget.cpp | 94 ++++++++++++++++++++++++++++++++++++-------
+ 1 file changed, 79 insertions(+), 15 deletions(-)
+
+commit be193cdffdbf22e199de0464f36b6bca0f889f88
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-10-23 01:17:38 -0400
+
+    implemented SearchWidget
+
+ src/search_widget.cpp | 198 +++++++++++++++++++++++++++++++++++++++++++-------
+ 1 file changed, 173 insertions(+), 25 deletions(-)
+
+commit d7cbda72b8af405060c7a16f2e838892f068bdb8
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-10-22 20:46:18 -0400
+
+    impliment workspace + comments redo
+
+ CMakeLists.txt           |   4 +-
+ src/workspace_widget.cpp | 144 +++++++++++++++++++++++++++++++++++++++--------
+ 2 files changed, 121 insertions(+), 27 deletions(-)
+
+commit 81452582fade30172179b6a3ef36ad3baa05d639
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-10-22 20:04:49 -0400
+
+    implemented SearchResultModel
+
+ src/search_result_model.cpp | 102 ++++++++++++++++++++++++++++++++------------
+ 1 file changed, 74 insertions(+), 28 deletions(-)
+
+commit fb53c7bd9752fd0b68d95ff357d363f0f6f983fe
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-10-22 19:44:45 -0400
+
+    m3 setup
+
+ CMakeLists.txt                             |  32 ++++++-
+ README.md                                  |  78 ++++++++--------
+ include/aiws/gui/context_widget.hpp        |  75 +++++++++++++++
+ include/aiws/gui/main_window.hpp           | 142 +++++++++++++++++++++++++++++
+ include/aiws/gui/resettable.hpp            |  22 +++++
+ include/aiws/gui/search_result_model.hpp   |  84 +++++++++++++++++
+ include/aiws/gui/search_widget.hpp         | 105 +++++++++++++++++++++
+ include/aiws/gui/term_inspector_widget.hpp |  81 ++++++++++++++++
+ include/aiws/gui/workspace_widget.hpp      | 101 ++++++++++++++++++++
+ src/context_widget.cpp                     |  42 +++++++++
+ src/main.cpp                               |  14 +++
+ src/main_window.cpp                        |  76 +++++++++++++++
+ src/search_result_model.cpp                |  54 +++++++++++
+ src/search_widget.cpp                      |  55 +++++++++++
+ src/term_inspector_widget.cpp              |  41 +++++++++
+ src/workspace_widget.cpp                   |  45 +++++++++
+ 16 files changed, 1010 insertions(+), 37 deletions(-)
+
+commit 288689dadb0fa45980f007b17a90af3cb9f64ba7
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-10-02 17:34:38 -0400
+
+    M2: Design
+
+ DESIGN.md | 54 ++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 54 insertions(+)
+
+commit 487869deb29b7f54a2f970d15e050aa09adda253
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-10-02 16:39:15 -0400
+
+    M2: student tests
+
+ tests/student_tests.cpp | 501 ++++++++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 490 insertions(+), 11 deletions(-)
+
+commit 4a96e5c7fb3bd007e52a6f75fa80c8e58863abca
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-10-02 16:29:09 -0400
+
+    M2: ProcessingCore owns strategies via unique_ptr; configurable constructor; dispatch through interfaces
+
+ src/processing_core.cpp | 132 +++++++++++++++++++++++++++++++++++++-----------
+ 1 file changed, 102 insertions(+), 30 deletions(-)
+
+commit 8f48332376c145642a787fb0deb0707dbdf1419b
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-10-02 16:06:22 -0400
+
+    M2: complete strategy interfaces as abstract polymorphic bases
+
+ include/aiws/chunking_strategy.hpp  | 31 ++++++++++++++++++++-----------
+ include/aiws/context_strategy.hpp   | 25 ++++++++++++++-----------
+ include/aiws/retrieval_strategy.hpp | 31 ++++++++++++++++++-------------
+ 3 files changed, 52 insertions(+), 35 deletions(-)
+
+commit 433258586e49b50c09ee827beee2af15c9519f0a
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-10-02 15:55:54 -0400
+
+    M2: pristine starter
+
+ CMakeLists.txt                      |  19 ++-
+ DESIGN.md                           |  85 ++++--------
+ Dockerfile                          |  42 ++++--
+ README.md                           |  61 +++++++--
+ include/aiws/chunker.hpp            |   8 +-
+ include/aiws/chunking_strategy.hpp  |  27 ++++
+ include/aiws/context_builder.hpp    |   9 +-
+ include/aiws/context_strategy.hpp   |  26 ++++
+ include/aiws/processing_core.hpp    |   7 +
+ include/aiws/retrieval_engine.hpp   |  10 +-
+ include/aiws/retrieval_strategy.hpp |  29 ++++
+ src/chunker.cpp                     |  66 +++------
+ src/context_builder.cpp             |  70 +++-------
+ src/corpus_index.cpp                |  97 +++++--------
+ src/processing_core.cpp             | 125 ++++++-----------
+ src/retrieval_engine.cpp            | 149 ++++++++------------
+ src/text_processor.cpp              | 139 +++++++++----------
+ src/workspace.cpp                   |   4 +-
+ tests/chunker_tests.cpp             | 202 ---------------------------
+ tests/context_builder_tests.cpp     | 149 --------------------
+ tests/corpus_index_tests.cpp        | 179 ------------------------
+ tests/processing_core_tests.cpp     | 263 ------------------------------------
+ tests/public_tests.cpp              | 115 +++++++++-------
+ tests/retrieval_engine_tests.cpp    | 236 --------------------------------
+ tests/student_tests.cpp             |  17 +++
+ tests/text_processor_tests.cpp      | 127 -----------------
+ 26 files changed, 522 insertions(+), 1739 deletions(-)
+
+commit 423c2dd825430e8842c2b4cdc6de12aff760e72b
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-10-02 15:53:34 -0400
+
+    Remove stray test binary
+
+ t | Bin 411928 -> 0 bytes
+ 1 file changed, 0 insertions(+), 0 deletions(-)
+
+commit 83b013b11ccb9c28e2e49b7c179eb61abc871ba5
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-09-19 15:57:19 -0400
+
+    M1: DESIGN.md
+
+ DESIGN.md | 74 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++------
+ 1 file changed, 67 insertions(+), 7 deletions(-)
+
+commit 2c6497eb9f07d1d98b06108e4b005ae8c3c8d9e7
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-09-19 11:10:54 -0400
+
+    M1: processing core + end-to-end tests
+
+ src/processing_core.cpp         | 136 ++++++++++++++++-----
+ t                               | Bin 0 -> 411928 bytes
+ tests/processing_core_tests.cpp | 263 ++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 371 insertions(+), 28 deletions(-)
+
+commit 283bbc83b7bb8edf8a88ceac98cdc669a698f328
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-09-19 11:06:13 -0400
+
+    Context builder tests done
+
+ src/context_builder.cpp         |  62 +++++++++++++++--
+ tests/context_builder_tests.cpp | 149 ++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 206 insertions(+), 5 deletions(-)
+
+commit 3252e6ae625c4c19d0455af1f2e1204e1bf4b2b4
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-09-19 10:56:21 -0400
+
+    retrieval engine
+
+ src/retrieval_engine.cpp         | 132 ++++++++++++++++++++--
+ tests/retrieval_engine_tests.cpp | 236 +++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 356 insertions(+), 12 deletions(-)
+
+commit faba12f8f96704d30625376096fb9eb8108f3149
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-09-19 01:30:22 -0400
+
+    M1: corpus index + tests
+
+ tests/corpus_index_tests.cpp | 179 +++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 179 insertions(+)
+
+commit 99bbf1bc1965f01c3eee57313b14f131ead5490f
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-09-19 00:52:44 -0400
+
+    2 components done
+
+ src/chunker.cpp         |  70 ++++++++++++++++-
+ src/corpus_index.cpp    |  91 +++++++++++++++++-----
+ tests/chunker_tests.cpp | 202 ++++++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 339 insertions(+), 24 deletions(-)
+
+commit d71591c9562375153651bbce7cd4afdaa5e5b7a2
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-09-19 00:43:39 -0400
+
+    M1: text processor + tests
+
+ src/text_processor.cpp         | 139 +++++++++++++++++++++++++++++++++++------
+ tests/text_processor_tests.cpp | 127 +++++++++++++++++++++++++++++++++++++
+ 2 files changed, 246 insertions(+), 20 deletions(-)
+
+commit 4795714b1cd3dc969cb5438aa397d2b995fa6137
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-09-19 00:32:56 -0400
+
+    M1: pristine starter v1.0
+
+ .DS_Store                         | Bin 6148 -> 0 bytes
+ .gitignore                        |   1 +
+ CMakeLists.txt                    |  26 ++++++++++++++
+ DESIGN.md                         |  18 ++++++++++
+ README.md                         |  28 ++++++++++++++++
+ data/public/doc_ai.txt            |   3 ++
+ data/public/doc_retrieval.txt     |   3 ++
+ data/public/doc_systems.txt       |   3 ++
+ data/public/queries.txt           |   4 +++
+ include/aiws/chunker.hpp          |  27 +++++++++++++++
+ include/aiws/context_builder.hpp  |  16 +++++++++
+ include/aiws/corpus_index.hpp     |  36 ++++++++++++++++++++
+ include/aiws/document.hpp         |  22 ++++++++++++
+ include/aiws/processing_core.hpp  |  46 +++++++++++++++++++++++++
+ include/aiws/processing_types.hpp |  38 +++++++++++++++++++++
+ include/aiws/retrieval_engine.hpp |  22 ++++++++++++
+ include/aiws/text_processor.hpp   |  29 ++++++++++++++++
+ include/aiws/workspace.hpp        |  19 +++++++++++
+ src/chunker.cpp                   |  19 +++++++++++
+ src/context_builder.cpp           |  11 ++++++
+ src/corpus_index.cpp              |  44 ++++++++++++++++++++++++
+ src/document.cpp                  |  14 ++++++++
+ src/processing_core.cpp           |  61 +++++++++++++++++++++++++++++++++
+ src/retrieval_engine.cpp          |  21 ++++++++++++
+ src/text_processor.cpp            |  34 +++++++++++++++++++
+ src/workspace.cpp                 |  19 +++++++++++
+ tests/public_tests.cpp            |  69 ++++++++++++++++++++++++++++++++++++++
+ 27 files changed, 633 insertions(+)
+
+commit 36d542f9884dfda06b21e57e903acc17b720d5ce
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-09-19 00:28:14 -0400
+
+    Remove M0 files before M1 starter (M0 kept at tag m0-submitted)
+
+ CMakeLists.txt          |  24 ----
+ DESIGN.md               |  24 ----
+ README.md               |  25 ----
+ include/Document.hpp    |  37 ------
+ include/Message.hpp     |  37 ------
+ include/Prompt.hpp      |  31 -----
+ include/Workspace.hpp   |  51 --------
+ src/Document.cpp        |  79 -----------
+ src/Message.cpp         |  37 ------
+ src/Prompt.cpp          |  37 ------
+ src/Workspace.cpp       |  77 -----------
+ src/main.cpp            |   7 -
+ tests/testworkspace.cpp | 339 ------------------------------------------------
+ text/sample.txt         |   1 -
+ 14 files changed, 806 deletions(-)
+
+commit 4ca79bb9808b1c8601a66ac7eb955ee3924955ed
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-09-03 18:00:52 -0400
+
+    final M0
+
+ DESIGN.md               |  11 ++
+ tests/testworkspace.cpp | 327 ++++++++++++++++++++++++++++++++++++++++++++++--
+ 2 files changed, 330 insertions(+), 8 deletions(-)
+
+commit 24b6675de30709110238aef0d14e54115a6f6739
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-09-03 17:02:34 -0400
+
+    src files done
+
+ src/Document.cpp  | 70 ++++++++++++++++++++++++++++++++++++++-----------------
+ src/Message.cpp   | 31 +++++++++++-------------
+ src/Prompt.cpp    | 30 +++++++++++-------------
+ src/Workspace.cpp | 61 +++++++++++++++++++++---------------------------
+ 4 files changed, 101 insertions(+), 91 deletions(-)
+
+commit 0ebf277399144bf6ecd297017e7b169346af1350
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-09-03 16:24:54 -0400
+
+    M0: starter package v1.1
+
+ .DS_Store               | Bin 0 -> 6148 bytes
+ .gitattributes          |   1 +
+ .gitignore              |   4 +++
+ CMakeLists.txt          |  24 ++++++++++++++
+ DESIGN.md               |  13 ++++++++
+ Dockerfile              |  20 +++++++++++
+ README.md               |  25 ++++++++++++++
+ include/Document.hpp    |  37 +++++++++++++++++++++
+ include/Message.hpp     |  37 +++++++++++++++++++++
+ include/Prompt.hpp      |  31 +++++++++++++++++
+ include/Workspace.hpp   |  51 ++++++++++++++++++++++++++++
+ src/Document.cpp        |  51 ++++++++++++++++++++++++++++
+ src/Message.cpp         |  42 +++++++++++++++++++++++
+ src/Prompt.cpp          |  41 +++++++++++++++++++++++
+ src/Workspace.cpp       |  86 ++++++++++++++++++++++++++++++++++++++++++++++++
+ src/main.cpp            |   7 ++++
+ tests/testworkspace.cpp |  28 ++++++++++++++++
+ text/sample.txt         |   1 +
+ 18 files changed, 499 insertions(+)
