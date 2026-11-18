@@ -46,18 +46,18 @@ bool parse_options(int argc, char* argv[], Options& options) {
 
         if (arg == "--build-delay-ms") {
             if (!has_value || !parse_delay(argv[++i], options.build_delay_ms)) {
-                std::cerr << "ai_workspace_m4: --build-delay-ms needs a whole number of ms (0 or more)\n";
+                std::cerr << "ai_workspace_m5: --build-delay-ms needs a whole number of ms (0 or more)\n";
                 return false;
             }
         } else if (arg == "--ipc-socket") {
             if (!has_value) {
-                std::cerr << "ai_workspace_m4: --ipc-socket needs a PATH\n";
+                std::cerr << "ai_workspace_m5: --ipc-socket needs a PATH\n";
                 return false;
             }
             options.ipc_socket = argv[++i];
         } else {
             // not fatal: the GUI is still perfectly usable without it
-            std::cerr << "ai_workspace_m4: ignoring unknown option " << arg << '\n';
+            std::cerr << "ai_workspace_m5: ignoring unknown option " << arg << '\n';
         }
     }
     return true;
@@ -70,7 +70,7 @@ int main(int argc, char* argv[]) {
 
     Options options;
     if (!parse_options(argc, argv, options)) {
-        std::cerr << "usage: ai_workspace_m4 [--build-delay-ms N] [--ipc-socket PATH]\n";
+        std::cerr << "usage: ai_workspace_m5 [--build-delay-ms N] [--ipc-socket PATH]\n";
         return 1;
     }
 
@@ -81,7 +81,7 @@ int main(int argc, char* argv[]) {
     // CR-1. if the socket can't be set up the app still runs, just without
     // remote add. the reason is on stderr and in the status line
     if (!window.start_remote_add(options.ipc_socket)) {
-        std::cerr << "ai_workspace_m4: remote add is unavailable on " << options.ipc_socket << '\n';
+        std::cerr << "ai_workspace_m5: remote add is unavailable on " << options.ipc_socket << '\n';
     }
 
     window.show();
