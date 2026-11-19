@@ -1,4 +1,5 @@
-// Student-written tests (M2 backend + M4 responsive GUI + CR-1 remote add)
+// Student-written tests (M2 backend + M4 responsive GUI + CR-1 remote add +
+// M5 thread-safe design)
 //
 // Groups:
 //   1. default configuration still behaves like M1
@@ -11,9 +12,12 @@
 //   7. M4 R3/R4: a failed build is reported, exit mid-build is quick, builds
 //      don't pile up
 //   8. CR-1 E1-E4: remote add through the real aiws_send and a raw client
+//   9. M5 R1-R5: one build thread, unwanted builds stop early, Exit never
+//      hangs, and the states decide every transition
 //
-// everything in 6-8 waits with a time limit, so a broken build fails here
-// within seconds instead of hanging until the 60 s ctest timeout
+// everything in 6-9 waits with a time limit, so a broken build fails here
+// within seconds instead of hanging until the 60 s ctest timeout. the two
+// Exit tests in 9 go further: a watchdog ends the run if Exit hangs
 
 #include "aiws/chunker.hpp"
 #include "aiws/chunking_strategy.hpp"
@@ -22,6 +26,7 @@
 #include "aiws/processing_core.hpp"
 #include "aiws/retrieval_engine.hpp"
 #include "aiws/retrieval_strategy.hpp"
+#include "aiws/gui/corpus_state.hpp"
 #include "aiws/gui/main_window.hpp"
 #include "aiws/ipc_protocol.hpp"
 
@@ -33,12 +38,18 @@
 #include <QTemporaryDir>
 #include <QTest>
 
+#include <dirent.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
 
+#include <atomic>
 #include <chrono>
+#include <condition_variable>
+#include <cstdlib>
 #include <cstring>
+#include <ctime>
+#include <mutex>
 #include <thread>
 
 #include <cmath>
@@ -510,7 +521,7 @@ public:
     }
 };
 
-// matches CorpusBuildJob::CoreFactory, ProcessingCore (*)()
+// matches aiws::gui::CoreFactory, ProcessingCore (*)()
 ProcessingCore failing_core() {
     return ProcessingCore(std::make_unique<FailingChunker>(), std::make_unique<RetrievalEngine>(),
                           std::make_unique<ContextBuilder>());
@@ -777,6 +788,269 @@ void test_exit_stops_server() {
     check(run_aiws_send({"--socket", sock, "add", "x.txt"}, dir.path()) == 2, "E4: nothing answers afterwards");
 }
 
+
+// ---- 9. M5 ---------------------------------------------------------------
+
+// how many threads this process has right now (Linux: one entry per thread)
+int thread_count() {
+    int n = 0;
+    DIR* dir = ::opendir("/proc/self/task");
+    if (!dir) return -1;
+    while (const dirent* e = ::readdir(dir)) {
+        if (e->d_name[0] != '.') ++n;
+    }
+    ::closedir(dir);
+    return n;
+}
+
+// counts the cores the worker actually builds. the factory runs on the
+// worker thread and the test reads it on this one, hence atomic
+std::atomic<int> cores_built{0};
+
+ProcessingCore counting_core() {
+    ++cores_built;
+    return ProcessingCore{};
+}
+
+// R4: runs f here (it destroys a window, so it has to be the GUI thread)
+// while a watchdog thread waits up to ms for it to return. if it doesn't,
+// the watchdog reports it and ends the whole run with exit 1, so a hang shows
+// up as a failure instead of a test that never finishes
+template <typename F>
+void must_finish_within(int ms, const std::string& name, F&& f) {
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool done = false;
+    std::thread watchdog([&] {
+        std::unique_lock<std::mutex> lock(mutex);
+        if (!cv.wait_for(lock, std::chrono::milliseconds(ms), [&] { return done; })) {
+            std::cerr << "FAIL: " << name << " (still running after " << ms << " ms)\n";
+            std::_Exit(1);
+        }
+    });
+    f();
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        done = true;
+    }
+    cv.notify_one();
+    watchdog.join();
+}
+
+// R1: five builds (with an Add in between, so they're real rebuilds) all ran
+// on the same thread, it isn't the GUI thread, and no thread was left behind
+void test_one_build_thread_for_all_builds() {
+    QTemporaryDir dir;
+    MainWindow w;
+    w.add_document_file(write_file(dir, "a.txt", "alpha beta"));
+    const int threads_before = thread_count();
+
+    bool same_thread = true;
+    for (int i = 0; i < 5; ++i) {
+        w.add_document_file(write_file(dir, QString("r1_%1.txt").arg(i), "gamma delta"));
+        click(w, "Build Corpus");
+        same_thread = same_thread && wait_until_idle(w) && w.last_build_thread_id() == w.build_thread_id();
+    }
+    check(same_thread, "R1: every build ran on the one build thread");
+    check(w.build_thread_id() != std::this_thread::get_id(), "R1: the build thread isn't the GUI thread");
+    check(thread_count() == threads_before, "R1: no thread created per build");
+}
+
+// R1 / constraint 3: a worker with nothing to do sleeps on its condition
+// variable. a polling or spinning one would burn CPU the whole half second
+void test_idle_worker_uses_no_cpu() {
+    QTemporaryDir dir;
+    MainWindow w;
+    w.add_document_file(write_file(dir, "a.txt", "alpha"));
+    click(w, "Build Corpus");
+    wait_until_idle(w);
+
+    const std::clock_t before = std::clock();
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    const double cpu_ms = 1000.0 * static_cast<double>(std::clock() - before) / CLOCKS_PER_SEC;
+    check(cpu_ms < 100.0, "R1: an idle worker doesn't busy-wait (CPU used over 0.5 s idle)");
+}
+
+// R3: Reset during a 6 s build. it has to stop within about one document,
+// so a new build right after is done long before the old one would have been
+void test_reset_stops_long_build() {
+    QTemporaryDir dir;
+    MainWindow w;
+    for (int i = 0; i < 3; ++i) w.add_document_file(write_file(dir, QString("long%1.txt").arg(i), "alpha"));
+    w.set_build_delay_ms(2000);
+    click(w, "Build Corpus");
+    QTest::qWait(100);
+
+    click(w, "Reset");
+    check(!w.is_building() && !w.is_corpus_current(), "R3: Reset leaves the building state right away");
+
+    w.add_document_file(write_file(dir, "new.txt", "beta"));
+    w.set_build_delay_ms(0);
+    click(w, "Build Corpus");
+    check(wait_until_idle(w, 1500) && w.is_corpus_current(),
+          "R3: the build after Reset doesn't wait for the cancelled 6 s one");
+}
+
+// R3 + decision 2: same thing for a workspace change. add_document_file is
+// the same function a remote add goes through
+void test_add_stops_long_build() {
+    QTemporaryDir dir;
+    MainWindow w;
+    for (int i = 0; i < 3; ++i) w.add_document_file(write_file(dir, QString("long%1.txt").arg(i), "alpha"));
+    w.set_build_delay_ms(2000);
+    click(w, "Build Corpus");
+    QTest::qWait(100);
+
+    w.add_document_file(write_file(dir, "added.txt", "beta"));
+    check(!w.is_building() && !w.is_corpus_current(), "R3: Add leaves the building state right away");
+    check(find_button(w, "Build Corpus")->isEnabled(), "R3: Build is enabled again right after the Add");
+
+    w.set_build_delay_ms(0);
+    click(w, "Build Corpus");
+    check(wait_until_idle(w, 1500) && w.is_corpus_current(),
+          "R3: the build after Add doesn't wait for the cancelled 6 s one");
+}
+
+// R2/R3: two builds that stop being wanted (one cancelled by an Add, the
+// next by another Add) never get as far as building a core. only the last
+// one does. counted where the core is made, on the worker
+void test_unwanted_builds_never_built() {
+    QTemporaryDir dir;
+    MainWindow w;
+    w.set_core_factory(&counting_core);
+    w.add_document_file(write_file(dir, "a.txt", "alpha"));
+    w.set_build_delay_ms(1500);
+    cores_built = 0;
+
+    click(w, "Build Corpus");
+    QTest::qWait(100);
+    w.add_document_file(write_file(dir, "b.txt", "beta"));
+    click(w, "Build Corpus");
+    QTest::qWait(100);
+    w.add_document_file(write_file(dir, "c.txt", "gamma"));
+
+    w.set_build_delay_ms(0);
+    click(w, "Build Corpus");
+    check(wait_until_idle(w, 1500) && w.is_corpus_current(), "R2: the build that's still wanted finishes");
+    QTest::qWait(200);
+    check(cores_built == 1, "R2/R3: builds that stopped being wanted were never built");
+}
+
+// R4: Exit when the worker is asleep waiting for work. the worker only wakes
+// up if shutdown actually tells it to. the short waits make sure it's
+// already asleep on its condition variable when the window goes
+void test_exit_with_idle_worker_never_hangs() {
+    must_finish_within(2000, "R4: Exit right after start, worker idle", [] {
+        MainWindow w;
+        QTest::qWait(50);
+    });
+
+    QTemporaryDir dir;
+    must_finish_within(2000, "R4: Exit after a build, worker idle again", [&] {
+        MainWindow w;
+        w.add_document_file(write_file(dir, "a.txt", "alpha"));
+        click(w, "Build Corpus");
+        wait_until_idle(w);
+        QTest::qWait(50);
+    });
+    check(true, "R4: Exit with an idle worker returned");
+}
+
+// R4: Exit in the middle of a 20 s build, stopped within about one document
+void test_exit_mid_build_never_hangs() {
+    QTemporaryDir dir;
+    QElapsedTimer t;
+    must_finish_within(3000, "R4: Exit mid-build", [&] {
+        MainWindow w;
+        w.add_document_file(write_file(dir, "a.txt", "alpha"));
+        w.add_document_file(write_file(dir, "b.txt", "beta"));
+        w.set_build_delay_ms(10000);
+        click(w, "Build Corpus");
+        QTest::qWait(100);
+        t.start();
+    });
+    check(t.elapsed() < 1000, "R4: Exit mid-build stops and joins the worker quickly");
+}
+
+// R5: a fake context that just counts what the states ask it to do, so the
+// states can be driven directly, with no window and no worker
+class RecordingContext final : public aiws::gui::CorpusContext {
+public:
+    int started = 0;
+    int cancelled = 0;
+    int used = 0;
+    int failed = 0;
+
+    void start_build() override { ++started; }
+    void cancel_build() override { ++cancelled; }
+    void use_corpus(std::shared_ptr<ProcessingCore>) override { ++used; }
+    void show_build_failed(const QString&) override { ++failed; }
+    void invalidate_corpus() override {}
+};
+
+// R5: every transition in the DESIGN.md table, decided by the state objects
+void test_states_decide_transitions() {
+    using namespace aiws::gui;
+    RecordingContext c;
+
+    // NotBuilt + Build -> Building, and a build was started
+    auto building = NotBuiltState{}.on_build_requested(c);
+    check(c.started == 1 && building && building->building() && !building->corpus_usable(),
+          "R5: NotBuilt + Build -> Building");
+
+    // decision 1: Build during a build is ignored
+    check(building->on_build_requested(c) == nullptr && c.started == 1, "R5: Building + Build -> ignored");
+
+    // Building + workspace change / Reset -> NotBuilt, and the build is cancelled
+    auto after_add = building->on_workspace_changed(c);
+    check(c.cancelled == 1 && after_add && !after_add->building() && !after_add->corpus_usable(),
+          "R5: Building + workspace change -> cancel, NotBuilt");
+    auto after_reset = NotBuiltState{}.on_build_requested(c)->on_reset(c);
+    check(c.cancelled == 2 && after_reset && !after_reset->building(), "R5: Building + Reset -> cancel, NotBuilt");
+
+    // Building + finished -> Current (the corpus is used)
+    auto current = NotBuiltState{}.on_build_requested(c)->on_build_finished(c, std::make_shared<ProcessingCore>());
+    check(c.used == 1 && current && current->corpus_usable() && !current->building(),
+          "R5: Building + finished -> Current");
+
+    // Current + Build -> Building, with the old corpus still usable
+    auto rebuilding = current->on_build_requested(c);
+    check(rebuilding && rebuilding->building() && rebuilding->corpus_usable(),
+          "R5: Current + Build -> Building, old corpus stays usable");
+
+    // Current + workspace change -> NotBuilt, nothing to cancel
+    auto stale = current->on_workspace_changed(c);
+    check(stale && !stale->corpus_usable() && c.cancelled == 2, "R5: Current + workspace change -> NotBuilt");
+
+    // Building + failed -> Failed, Build allowed again
+    auto failed = NotBuiltState{}.on_build_requested(c)->on_build_failed(c, "boom");
+    check(c.failed == 1 && failed && !failed->corpus_usable() && failed->build_allowed(),
+          "R5: Building + failed -> Failed, Build allowed again");
+
+    // a result that arrives when no build is wanted is dropped
+    check(NotBuiltState{}.on_build_finished(c, std::make_shared<ProcessingCore>()) == nullptr && c.used == 1,
+          "R5: NotBuilt + finished -> ignored");
+}
+
+// R1-R4 together: lots of Add / Build / Reset in a row, none of it waited
+// for. the app ends up consistent and no thread was left behind
+void test_rapid_events() {
+    QTemporaryDir dir;
+    MainWindow w;
+    const int threads_before = thread_count();
+    w.set_build_delay_ms(50);
+    for (int i = 0; i < 30; ++i) {
+        w.add_document_file(write_file(dir, QString("rapid%1.txt").arg(i), "alpha beta"));
+        click(w, "Build Corpus");
+        if (i % 4 == 3) click(w, "Reset");
+        QTest::qWait(5);
+    }
+    w.set_build_delay_ms(0);
+    if (!w.is_building()) click(w, "Build Corpus");
+    check(wait_until_idle(w, 3000) && w.is_corpus_current(), "R1-R4: still builds correctly after rapid events");
+    check(thread_count() == threads_before, "R1: rapid builds didn't create threads");
+}
+
 }  // namespace
 
 // QApplication: the M4/CR-1 tests create MainWindows and need an event loop
@@ -798,20 +1072,37 @@ int main(int argc, char* argv[]) {
     test_strategy_exception_mid_rebuild_keeps_corpus();
     test_index_failure_after_chunking_keeps_corpus();
 
-    test_build_runs_in_background();
-    test_add_during_build_discards_result();
-    test_reset_and_readd_during_build_discards_result();
-    test_unreadable_add_changes_nothing();
-    test_failed_build_is_reported();
-    test_exit_during_long_build_is_quick();
-    test_repeated_builds();
+    // every GUI test below makes and destroys MainWindows, and a broken
+    // shutdown would hang on the very first one. so: the M5 Exit tests run
+    // first, each with its own watchdog, and the whole GUI part runs under a
+    // 45 s one, so a hang anywhere is a failure well inside ctest's 60 s
+    must_finish_within(45000, "GUI tests (groups 6-9)", [] {
+        test_exit_with_idle_worker_never_hangs();
+        test_exit_mid_build_never_hangs();
 
-    test_remote_add_relative_path();
-    test_remote_add_during_build_discards_result();
-    test_remote_add_unusual_paths();
-    test_remote_add_rejections();
-    test_request_in_pieces();
-    test_exit_stops_server();
+        test_build_runs_in_background();
+        test_add_during_build_discards_result();
+        test_reset_and_readd_during_build_discards_result();
+        test_unreadable_add_changes_nothing();
+        test_failed_build_is_reported();
+        test_exit_during_long_build_is_quick();
+        test_repeated_builds();
+
+        test_remote_add_relative_path();
+        test_remote_add_during_build_discards_result();
+        test_remote_add_unusual_paths();
+        test_remote_add_rejections();
+        test_request_in_pieces();
+        test_exit_stops_server();
+
+        test_one_build_thread_for_all_builds();
+        test_idle_worker_uses_no_cpu();
+        test_reset_stops_long_build();
+        test_add_stops_long_build();
+        test_unwanted_builds_never_built();
+        test_states_decide_transitions();
+        test_rapid_events();
+    });
 
     if (failures) {
         std::cerr << failures << " of " << checks << " checks failed\n";

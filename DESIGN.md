@@ -1,70 +1,53 @@
-# M4 Decision Record
+# M5 Decision Record
 
-## 1. Threads and ownership
+## 1. M4 fixes
 
-| Thread | Runs |
-|---|---|
-| GUI | every `MainWindow` slot and widget; `CorpusBuildJob` and `IpcServer` construction/destruction, `take_result()`, `stop()` |
-| Build worker (`CorpusBuildJob::worker_`) | `CorpusBuildJob::run()` |
-| IPC worker (`IpcServer::worker_`) | `IpcServer::run()`, `serve_client()` |
+- `IpcServer` called `std::strerror` on both the GUI and IPC threads (shared static buffer). Now `error_text()` uses `strerror_r`.
+- The IPC thread woke every 100 ms to check `stop_`. It now sleeps in `poll()` with no timeout, and `IpcServer::stop()` wakes it through a pipe (constraint 3).
 
-`MainWindow` owns `build_job_` and `ipc_server_` (`std::unique_ptr`). `~CorpusBuildJob` sets `cancel_` and joins, and `IpcServer::stop()` sets `stop_`, joins and unlinks the socket. So `~MainWindow` joins both threads, and nothing is detached. **A built corpus** is created in `run()`, moved into `promise_`, taken by `build_finished()` through `take_result()`, then moved into `processing_core_` or destroyed, both on the GUI thread.
+## 2. Threads and shared data
 
-**Constraint 5:**
+Three threads: **GUI** (every `MainWindow` slot, all state objects, `BuildWorker::submit / set_wanted_generation / shutdown`), **build worker** (`BuildWorker::run()`, `build()`), and **IPC** (`IpcServer::run()`, `serve_client()`).
 
-| Data | Writer | Reader | Safe because |
-|---|---|---|---|
-| `CorpusBuildJob::cancel_` | GUI | build worker | `std::atomic<bool>` |
-| `IpcServer::stop_` | GUI | IPC worker | `std::atomic<bool>` |
-| `promise_`/`future_` state | build worker | GUI | the standard library synchronizes it, and `build_finished()` is posted after the promise is set, so `get()` never blocks |
+| Shared mutable data | Threads | Why it's safe |
+|---|---|---|
+| `BuildWorker::pending_`, `wanted_generation_`, `stop_` | GUI writes, worker reads | only touched with `mutex_` locked; every change is followed by `cv_.notify`, and the worker waits with a predicate, so no wakeup is lost |
+| `BuildResult` | worker → GUI | emitted through a queued signal: Qt copies it into its locked event queue |
+| IPC wake pipe | GUI writes, IPC reads | kernel object; opened before the thread starts, closed after `join()` |
 
-Everything else a worker uses is a copy (the `workspace_` snapshot) or set before the thread starts and never changed.
+The request's workspace is a copy moved out under the lock; then only the worker uses it. ThreadSanitizer: no races.
 
-## 2. How a finished build is judged valid
+## 3. States
 
-`add_document_file()` and `reset_application()` increment `build_generation_`. `build_finished()` accepts a result only if `job->generation() == build_generation_`. Otherwise it calls `invalidate_corpus()` and drops the result. No failure is shown, just a "discarded" status line. A document count wouldn't work, because Reset plus re-adding the same file gives the same count.
+| State | Build | Workspace changed | Reset | Finished | Failed |
+|---|---|---|---|---|---|
+| `NotBuiltState` (start) | `start_build()` → Building | stay | stay | ignore | ignore |
+| `BuildingState` | ignore | `cancel_build()` → NotBuilt | `cancel_build()` → NotBuilt | `use_corpus()` → Current | `show_build_failed()` → Failed |
+| `CurrentState` | `start_build()` → Building (old corpus stays usable) | → NotBuilt | → NotBuilt | ignore | ignore |
+| `FailedState` | `start_build()` → Building | → NotBuilt | → NotBuilt | ignore | ignore |
 
-## 3. Changes since the checkpoint
+Each event is a virtual function returning the next state (null = stay); `MainWindow::apply()` swaps it in after the call returns. States only see `CorpusContext`.
 
-- Add and Reset no longer cancel the build. A cancelled build became an exception and skipped the generation check, which hid the stale-accept fault. Cancel is now only used on exit.
-- Added `CoreFactory` / `set_core_factory()`, so tests can make a build fail.
-- Build Corpus is disabled while a build runs (FAQ decision).
-- `add_document()` now just opens the dialog and calls `add_document_file()`. Added `is_corpus_current()`, `is_building()` and `document_count()` for tests.
+## 4. Traced sequence: Reset during a long build
 
-## 4. CR-1 impact
+1. GUI: `reset_application()` bumps `build_generation_` to g+1 and clears the workspace.
+2. GUI: `apply(state_->on_reset(*this))` → `BuildingState::on_reset()` → `MainWindow::cancel_build()` → `BuildWorker::set_wanted_generation(g+1)` locks `mutex_`, sets it, unlocks, `notify_all()`. It returns `NotBuiltState`; Build is enabled again.
+3. Worker: in `build()`, `cv_.wait_for()` wakes, `should_stop(g)` is true, so it returns without emitting and goes back to `cv_.wait()` in `run()`.
+4. If the result was emitted just before step 2, `MainWindow::build_finished()` sees generation g ≠ g+1 and drops it.
 
-New: `ipc_protocol`, `IpcServer`, `tools/aiws_send.cpp`, `start_remote_add()`, `remote_add_requested()`, and `--ipc-socket`. The build path is unchanged: `remote_add_requested()` calls `add_document_file()`, so R2 applies as is.
+## 5. Decisions
 
-| | Byte 0 | Bytes 1-4 (big-endian) | Then |
-|---|---|---|---|
-| Request | `0x01` add | N (1-65536) | N bytes of UTF-8 absolute path |
-| Reply | `0x00` ok / `0x01` rejected | M | M bytes of UTF-8 reason |
+1. **Build during a build:** not allowed. `BuildingState::build_allowed()` is false, so `update_action_states()` disables the button, and `BuildingState::on_build_requested()` ignores it.
+2. **Remote add mid-build:** same as a local add. `remote_add_requested()` → `add_document_file()` → `BuildingState::on_workspace_changed()` cancels the build. The user sees "Out of date" and "The running build was cancelled", and rebuilds manually.
+3. **Shared data:** `pending_`, `wanted_generation_`, `stop_` under one mutex. Not smaller: the worker must learn three separate things (new work, a cancel, exit), and the result travels in Qt's event queue.
 
-The length prefix handles E2 without escaping, and `read_exact()` handles E3. `serve_client()` checks the file itself (`open` + `S_ISREG`), posts the path with a queued `invokeMethod`, then replies, so it never waits for the GUI. Waits are `poll()` calls of at most 100 ms that check `stop_` (E4). Bad `aiws_send` usage exits 1.
-
-## 5. Fault switches
+## 6. Fault switches
 
 | Macro | Location | Caught by |
 |---|---|---|
-| `AIWS_FAULT_ACCEPT_STALE` | `MainWindow::build_finished()` | `test_add_during_build_discards_result`, `test_reset_and_readd_during_build_discards_result`, `test_remote_add_during_build_discards_result` |
-| `AIWS_FAULT_LOSE_FAILURE` | `catch` in `CorpusBuildJob::run()` | `test_failed_build_is_reported` |
+| `AIWS_FAULT_NO_CANCEL` | `BuildWorker::should_stop()` | `test_reset_stops_long_build`, `test_add_stops_long_build`, `test_unwanted_builds_never_built` |
+| `AIWS_FAULT_SILENT_SHUTDOWN` | `BuildWorker::shutdown()` (skips `notify_all`) | `test_exit_with_idle_worker_never_hangs` (watchdog, fails in 2 s) |
 
-## 6. AI-use disclosure
+## 7. AI-use disclosure
 
-## AI Use Disclosure
-
-I used AI as an assistant to review the M4 requirements, talk through design decisions, and help debug parts of my implementation and tests. I reviewed and edited all of the submitted code myself, then built and tested it on my own to confirm it works as intended.
-I used Claude (Anthropic) to help write up our pair programming log. I gave it the session details from Mustaali's and my sessions, including dates, times, driver/navigator roles, what we worked on, and each person's navigator contributions. Claude reworded the log from my perspective, updated the Session 2 timing to 9:40 PM–10:20 PM, and formatted it in Markdown. All of the session content, timing, and contributions came from Mustaali and me, and I reviewed the final version for accuracy.
----
-
-## Pair programming log
-
-<!-- TODO (you): fill in from your real sessions. -->
-
-**Session 1: November 6, 2026, 9:15 AM–10:00 AM.** We worked on Mustaali's M4 code, mainly the background build, stale-generation handling, and CR-1 remote add behavior. Mustaali drove from 9:15 AM to 9:40 AM, walking through `build_corpus()`, `run_build()`, `build_finished()`, and how Workspace changes invalidate a running build. We swapped roles at 9:40 AM, and I drove from 9:40 AM to 10:00 AM while Mustaali navigated through the related tests and fault behavior. My navigator contribution was reviewing the stale-build path and reminding Mustaali that a remote add during an active build needed to invalidate the old build the same way a GUI add does.
-
-**Session 2: November 6, 2026, 9:40 PM–10:20 PM.** We worked on my M4 code, mainly my background-build and CR-1 integration. I drove from 9:40 PM to 10:00 PM while Mustaali navigated and reviewed the thread lifecycle, generation checking, and stale-result handling. We swapped roles at 10:00 PM, and Mustaali drove from 10:00 PM to 10:20 PM while we reviewed my tests and integration behavior. Mustaali's navigator contribution was pointing out that I needed to handle and test the case where the Workspace changes while a corpus build is still running.
-
-The interaction that worked best for us was having the driver explain each change while the navigator followed the control flow and called out edge cases before moving on.
-
-The interaction that worked best for us was having the driver explain each change while the navigator followed the control flow and called out edge cases before moving on.
+I used Claude throughout M5. It reviewed my M4 against the M5 spec, proposed the design and assisted me in development checking for bugs ands builds. 
