@@ -1,6 +1,5 @@
 #pragma once
 
-#include <atomic>
 #include <string>
 #include <thread>
 
@@ -32,19 +31,23 @@ public:
     IpcServer(IpcServer&&) = delete;
     IpcServer& operator=(IpcServer&&) = delete;
 
-    // E4: tells the worker to stop, joins it (it notices within one 100 ms
-    // poll slice), then closes the socket and removes the socket file.
-    // safe to call more than once
+    // E4: wakes the worker through the wake pipe and joins it (it returns
+    // right away, there's no slice to wait out), then closes the sockets and
+    // removes the socket file. safe to call more than once
     void stop() noexcept;
 
     const std::string& socket_path() const noexcept;
 
 private:
-    // worker thread: wait for a client, serve it, repeat until stop_
+    // worker thread: wait for a client, serve it, repeat until woken to stop
     void run();
 
     // worker thread: read one request, reply, and post the path if accepted
     void serve_client(int client_fd);
+
+    // closes both ends of the wake pipe. GUI thread, only once the worker is
+    // joined (or before it ever started)
+    void close_wake_pipe() noexcept;
 
     // set once in the constructor and only read after that
     std::string socket_path_;
@@ -52,9 +55,13 @@ private:
     const char* add_slot_;
     int listen_fd_{-1};
 
-    // the one piece of mutable data both threads touch while both run:
-    // written by the GUI thread (stop), read by the worker
-    std::atomic<bool> stop_{false};
+    // M5: how stop() wakes the worker. the worker's poll() watches the read
+    // end next to the socket, with no timeout, so it sleeps until a client or
+    // stop() shows up instead of waking every 100 ms to check a flag. both
+    // ends are opened before the thread starts and closed after it's joined,
+    // and the kernel does the synchronizing for the one byte that goes through
+    int wake_read_fd_{-1};
+    int wake_write_fd_{-1};
 
     // GUI thread only. makes stop() safe to call twice
     bool stopped_{false};

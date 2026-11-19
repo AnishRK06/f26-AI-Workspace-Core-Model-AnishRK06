@@ -5,34 +5,40 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <cstdlib>
+#include <limits>
 
 namespace aiws::ipc {
 namespace {
 
-// ms left until the deadline, capped at one poll slice. 0 = time is up
-int slice_until(Clock::time_point deadline) {
+// ms left until the deadline. 0 = time is up
+int ms_until(Clock::time_point deadline) {
     const auto left =
         std::chrono::duration_cast<std::chrono::milliseconds>(deadline - Clock::now()).count();
     if (left <= 0) return 0;
-    return static_cast<int>(std::min<long long>(left, kPollSliceMs));
+    return static_cast<int>(std::min<long long>(left, std::numeric_limits<int>::max()));
 }
 
-// waits in short slices so a stop request or the deadline is noticed quickly,
-// instead of one long poll() that could outlast both
-bool wait_ready(int fd, short events, Clock::time_point deadline, const std::atomic<bool>* stop) {
+// one poll() for the whole time left, no slices: it returns when fd is ready,
+// when wake_fd says stop, or at the deadline, whichever comes first. so the
+// thread sleeps the whole time instead of waking up to check a flag
+bool wait_ready(int fd, short events, Clock::time_point deadline, int wake_fd) {
     for (;;) {
-        if (stop && stop->load()) return false;
-        const int slice = slice_until(deadline);
-        if (slice == 0) return false;
+        const int timeout = ms_until(deadline);
+        if (timeout == 0) return false;
 
-        pollfd p{fd, events, 0};
-        const int ready = ::poll(&p, 1, slice);
-        // ready can also mean HUP/ERR. the recv/send after this reports which
-        if (ready > 0) return true;
+        // poll() skips an entry whose fd is negative, so -1 just means no wake pipe
+        std::array<pollfd, 2> p{{{fd, events, 0}, {wake_fd, POLLIN, 0}}};
+        const int ready = ::poll(p.data(), p.size(), timeout);
         if (ready < 0 && errno != EINTR) return false;
-        // 0 = this slice ran out, EINTR = interrupted. either way go again
+        if (ready <= 0) continue;  // EINTR, or the deadline: the check above decides
+
+        // asked to stop. checked first, so a stop always wins over more data
+        if (p[1].revents != 0) return false;
+        // ready can also mean HUP/ERR. the recv/send after this reports which
+        return true;
     }
 }
 
@@ -68,12 +74,11 @@ std::uint32_t decode_length(const unsigned char* bytes) {
 
 // one recv can return fewer bytes than asked for (the sender split its
 // writes, or they just arrived that way), so keep going until we have all n
-bool read_exact(int fd, void* buffer, std::size_t n, Clock::time_point deadline,
-                const std::atomic<bool>* stop) {
+bool read_exact(int fd, void* buffer, std::size_t n, Clock::time_point deadline, int wake_fd) {
     auto* out = static_cast<unsigned char*>(buffer);
     std::size_t got = 0;
     while (got < n) {
-        if (!wait_ready(fd, POLLIN, deadline, stop)) return false;
+        if (!wait_ready(fd, POLLIN, deadline, wake_fd)) return false;
         const ssize_t r = ::recv(fd, out + got, n - got, 0);
         if (r > 0) {
             got += static_cast<std::size_t>(r);
@@ -88,12 +93,11 @@ bool read_exact(int fd, void* buffer, std::size_t n, Clock::time_point deadline,
 
 // MSG_NOSIGNAL: if the other side already hung up we get an error back here,
 // instead of SIGPIPE killing the whole process
-bool write_all(int fd, const void* buffer, std::size_t n, Clock::time_point deadline,
-               const std::atomic<bool>* stop) {
+bool write_all(int fd, const void* buffer, std::size_t n, Clock::time_point deadline, int wake_fd) {
     const auto* in = static_cast<const unsigned char*>(buffer);
     std::size_t sent = 0;
     while (sent < n) {
-        if (!wait_ready(fd, POLLOUT, deadline, stop)) return false;
+        if (!wait_ready(fd, POLLOUT, deadline, wake_fd)) return false;
         const ssize_t w = ::send(fd, in + sent, n - sent, MSG_NOSIGNAL);
         if (w > 0) {
             sent += static_cast<std::size_t>(w);

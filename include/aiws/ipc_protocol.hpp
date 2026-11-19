@@ -1,6 +1,5 @@
 #pragma once
 
-#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -48,10 +47,6 @@ constexpr int kExchangeTimeoutMs = 5000;
 // stuck client can't block the others or the shutdown
 constexpr int kRequestTimeoutMs = 5000;
 
-// longest single poll() wait. short enough that anything blocked on a socket
-// sees the stop flag well inside E4's 500 ms
-constexpr int kPollSliceMs = 100;
-
 using Clock = std::chrono::steady_clock;
 
 // /tmp/aiws-$USER.sock, or /tmp/aiws-<uid>.sock if USER isn't set
@@ -64,12 +59,12 @@ std::string encode(std::uint8_t code, const std::string& body);
 std::uint32_t decode_length(const unsigned char* bytes);
 
 // reads exactly n bytes, however many pieces they come in (E3). false on EOF
-// before n bytes, a socket error, the deadline, or stop being set
-bool read_exact(int fd, void* buffer, std::size_t n, Clock::time_point deadline,
-                const std::atomic<bool>* stop = nullptr);
+// before n bytes, a socket error, the deadline, or wake_fd becoming readable.
+// wake_fd is the read end of a pipe another thread writes to when it wants
+// this one to stop. -1 = none (aiws_send has no other thread)
+bool read_exact(int fd, void* buffer, std::size_t n, Clock::time_point deadline, int wake_fd = -1);
 
 // writes all n bytes. same false cases as read_exact
-bool write_all(int fd, const void* buffer, std::size_t n, Clock::time_point deadline,
-               const std::atomic<bool>* stop = nullptr);
+bool write_all(int fd, const void* buffer, std::size_t n, Clock::time_point deadline, int wake_fd = -1);
 
 }  // namespace aiws::ipc
