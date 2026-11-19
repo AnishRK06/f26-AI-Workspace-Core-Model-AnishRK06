@@ -51,7 +51,6 @@ add_library(aiws_app STATIC
     src/context_widget.cpp
     src/term_inspector_widget.cpp
     src/search_result_model.cpp
-    src/corpus_build_job.cpp
     src/build_worker.cpp
     src/corpus_state.cpp
     src/ipc_server.cpp
@@ -62,7 +61,6 @@ add_library(aiws_app STATIC
     include/aiws/gui/context_widget.hpp
     include/aiws/gui/term_inspector_widget.hpp
     include/aiws/gui/search_result_model.hpp
-    include/aiws/gui/corpus_build_job.hpp
     include/aiws/gui/build_worker.hpp
     include/aiws/gui/corpus_state.hpp
     include/aiws/gui/ipc_server.hpp

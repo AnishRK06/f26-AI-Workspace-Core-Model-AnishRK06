@@ -2,7 +2,8 @@
 
 #include <QMainWindow>
 
-#include "aiws/gui/corpus_build_job.hpp"
+#include "aiws/gui/build_worker.hpp"
+#include "aiws/gui/corpus_state.hpp"
 #include "aiws/gui/ipc_server.hpp"
 #include "aiws/processing_core.hpp"
 #include "aiws/workspace.hpp"
@@ -11,6 +12,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <thread>
 
 class QLabel;
 class QPushButton;
@@ -30,8 +32,12 @@ class WorkspaceWidget;
  * MainWindow owns the application Workspace and ProcessingCore, composes the
  * major GUI components, and coordinates application-wide state changes and
  * backend operations in response to component events.
+ *
+ * M5: the corpus lifecycle is a CorpusState (State pattern). MainWindow
+ * forwards each event to the current state and implements CorpusContext, the
+ * actions a state may take. Every build runs on one BuildWorker thread.
  */
-class MainWindow final : public QMainWindow {
+class MainWindow final : public QMainWindow, public CorpusContext {
     Q_OBJECT
 
 public:
@@ -72,20 +78,26 @@ public:
      */
     void set_build_delay_ms(int ms_per_document);
 
-    // ---- M4 additions (my design) -----------------------------------------
+    // ---- M4/M5 additions (my design) --------------------------------------
 
     /**
      * @brief Sets what makes the core each later build fills in. Test hook.
      * @param factory Null means the default ProcessingCore. Tests pass one whose
      * chunking strategy throws, so they can check that a failed build is reported.
      */
-    void set_core_factory(CorpusBuildJob::CoreFactory factory) noexcept;
+    void set_core_factory(CoreFactory factory) noexcept;
 
     /** @brief True while Search, Term Inspector and Context may use the corpus. */
     bool is_corpus_current() const noexcept;
 
-    /** @brief True from Build Corpus until build_finished() handles the result. */
+    /** @brief True from Build Corpus until the build's result is handled or it's cancelled. */
     bool is_building() const noexcept;
+
+    /** @brief Id of the one build thread (R1 tests). */
+    std::thread::id build_thread_id() const noexcept;
+
+    /** @brief Id of the thread the last handled build ran on (R1 tests). Default id if none yet. */
+    std::thread::id last_build_thread_id() const noexcept;
 
     /** @brief Number of documents in the Workspace (lets tests see a remote add land). */
     std::size_t document_count() const noexcept;
@@ -152,12 +164,16 @@ private slots:
     void exit_application();
 
     /**
-     * @brief Takes the finished build's result and decides whether it becomes current.
-     *
-     * Invoked (queued) by the CorpusBuildJob once its result is ready, so it
-     * always runs on the GUI thread.
+     * @brief Forwards a finished build to the current state, unless it's for an old generation.
+     * @param result The built corpus. Queued from the BuildWorker, so this runs on the GUI thread.
      */
-    void build_finished();
+    void build_finished(aiws::gui::BuildResult result);
+
+    /**
+     * @brief Forwards a failed build to the current state, unless it's for an old generation.
+     * @param result Holds the reason. Queued from the BuildWorker, so this runs on the GUI thread.
+     */
+    void build_failed(const aiws::gui::BuildResult& result);
 
     /**
      * @brief CR-1: adds a path received by the IpcServer, exactly like Add Document.
@@ -166,18 +182,40 @@ private slots:
     void remote_add_requested(const QString& path);
 
 private:
-    /**
-     * @brief Updates availability of actions that depend on current application state.
-     */
-    void update_action_states();
+    // ---- CorpusContext: what a state may do (only states call these) -----
+
+    /** @brief Snapshots the workspace and submits it to the worker. Never waits (R2). */
+    void start_build() override;
+
+    /** @brief Tells the worker builds for older generations are no longer wanted (R3). */
+    void cancel_build() override;
+
+    /** @brief Makes a finished build the current corpus and shows it. */
+    void use_corpus(std::shared_ptr<ProcessingCore> core) override;
+
+    /** @brief Reports a failed build. The app stays usable. */
+    void show_build_failed(const QString& reason) override;
 
     /**
-     * @brief Marks the processing corpus as no longer current for the workspace.
+     * @brief Takes output that depends on the previous corpus off the screen.
      *
      * Processing output that depends on the previous corpus is no longer made
      * available after invalidation.
      */
-    void invalidate_corpus();
+    void invalidate_corpus() override;
+
+    // ---- everything else ---------------------------------------------------
+
+    /**
+     * @brief Changes to the state the current state chose and refreshes the buttons.
+     * @param next The new state, or null to stay in the current one.
+     */
+    void apply(std::unique_ptr<CorpusState> next);
+
+    /**
+     * @brief Updates availability of actions that depend on current application state.
+     */
+    void update_action_states();
 
     /**
      * @brief Clears displayed search and context output that depends on processing state.
@@ -186,19 +224,22 @@ private:
 
     Workspace workspace_;
     ProcessingCore processing_core_;
-    bool corpus_current_{false};
     ExitCallback exit_callback_{nullptr};
 
-    // goes up on every Add Document and Reset. a finished build only becomes
-    // current if it was started for the generation we're still on
+    // R5: where the corpus is in its lifecycle. replaced only in apply()
+    std::unique_ptr<CorpusState> state_{std::make_unique<NotBuiltState>()};
+
+    // goes up on every Add Document and Reset. a finished build is only
+    // passed to the state if it was started for the generation we're still on
     std::uint64_t build_generation_{0};
     int build_delay_ms_{0};
-    CorpusBuildJob::CoreFactory core_factory_{nullptr};
+    CoreFactory core_factory_{nullptr};
+    std::thread::id last_build_thread_id_;
 
-    // at most one build at a time. null when nothing is building. declared
-    // after workspace_ and processing_core_, so they're destroyed in the
-    // opposite order: both threads are joined before anything else goes
-    std::unique_ptr<CorpusBuildJob> build_job_;
+    // declared after workspace_ and processing_core_, so they're destroyed in
+    // the opposite order: both threads are joined before anything else goes.
+    // the worker lives from the constructor until here (R1, R4)
+    std::unique_ptr<BuildWorker> build_worker_;
     std::unique_ptr<IpcServer> ipc_server_;
 
     WorkspaceWidget* workspace_widget_{nullptr};
