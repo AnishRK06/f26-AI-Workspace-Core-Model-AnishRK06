@@ -24,41 +24,44 @@ using CoreFactory = ProcessingCore (*)();
 // and from then on only the worker uses it
 struct BuildRequest {
     Workspace workspace;  // a copy (snapshot), never MainWindow's workspace_
-    std::uint64_t generation = 0;
-    int delay_ms_per_document = 0;
-    CoreFactory factory = nullptr;
+    std::uint64_t generation{0};
+    int delay_ms_per_document{0};
+    CoreFactory factory{nullptr};
 };
 
-// what comes back from a finished build. travels to the GUI thread inside a
-// queued signal, so Qt's event queue is what moves it between threads.
-// shared_ptr only so it's copyable (queued signal arguments get copied)
+// what comes back from a build. travels to the GUI thread inside a queued
+// signal, so Qt's event queue is what moves it between threads. shared_ptr
+// only so it's copyable (queued signal arguments get copied)
 struct BuildResult {
-    std::uint64_t generation = 0;
-    std::shared_ptr<ProcessingCore> core;  // null if the build failed
-    QString error;                         // why it failed, empty on success
+    std::uint64_t generation{0};
+    std::shared_ptr<ProcessingCore> core;  // the built corpus, null if it failed
+    QString error;                         // why it failed, empty if it didn't
     std::thread::id built_on;              // which thread ran it (R1 tests)
 };
 
-// M5: the one build thread (R1). it starts in the constructor and runs every
-// build until shutdown(). in between it sleeps on cv_, so it uses no CPU
-// while there's nothing to build. replaces M4's CorpusBuildJob, which made a
-// new thread for every build
+// The one build thread for the whole app (R1). It starts in the constructor
+// and runs every build until shutdown(). In between it sleeps on cv_, so it
+// uses no CPU while there's nothing to build. Replaces M4's CorpusBuildJob,
+// which made a new thread for every build.
 //
 // threads: the constructor, submit(), set_wanted_generation(), shutdown()
 // and the destructor run on the GUI thread. run() and build() are the only
-// worker-thread code. build_finished is emitted on the worker thread, but
-// it's connected queued, so the slot runs on the GUI thread
+// worker-thread code. the two signals are emitted on the worker thread, but
+// they're connected queued, so the slots run on the GUI thread
 class BuildWorker final : public QObject {
     Q_OBJECT
 
 public:
     explicit BuildWorker(QObject* parent = nullptr);
 
-    // shutdown(), so the thread is always joined, never left joinable
+    // shutdown(). never leaves a joinable thread behind
     ~BuildWorker() override;
 
+    // owns a running thread, so copying or moving it makes no sense
     BuildWorker(const BuildWorker&) = delete;
     BuildWorker& operator=(const BuildWorker&) = delete;
+    BuildWorker(BuildWorker&&) = delete;
+    BuildWorker& operator=(BuildWorker&&) = delete;
 
     // R2: puts the request in the one pending slot and wakes the worker.
     // returns right away, never waits for a build. a newer request just
@@ -72,14 +75,17 @@ public:
 
     // R4: tells the worker to stop, wakes it and joins it. a running build
     // stops within one document's delay. safe to call more than once
-    void shutdown();
+    void shutdown() noexcept;
 
     // the worker thread's id, so tests can check every build ran on it
     std::thread::id thread_id() const noexcept;
 
 signals:
-    // emitted on the worker thread for every build that wasn't cancelled
+    // one of these two for every build that wasn't cancelled. two signals
+    // instead of one, so "finished" and "failed" reach MainWindow as two
+    // separate events and nothing has to check which one it got
     void build_finished(aiws::gui::BuildResult result);
+    void build_failed(aiws::gui::BuildResult result);
 
 private:
     // worker thread: wait for a request (or stop), build it, repeat
@@ -97,13 +103,15 @@ private:
     std::mutex mutex_;
     std::condition_variable cv_;
     std::optional<BuildRequest> pending_;  // next build, empty if none
-    std::uint64_t wanted_generation_ = 0;  // builds for anything else stop
-    bool stop_ = false;                    // set once, by shutdown()
+    std::uint64_t wanted_generation_{0};  // builds for anything else stop
+    bool stop_{false};                    // set once, by shutdown()
 
-    // GUI thread only (start in the constructor, join in shutdown).
-    // declared last so everything above exists before run() starts
-    std::thread thread_;
-    std::thread::id thread_id_;
+    // GUI thread only. set in the constructor and only read after that
+    std::thread::id worker_id_;
+
+    // declared last on purpose: members are initialized in declaration
+    // order, so everything above exists before the thread starts run()
+    std::thread worker_;
 };
 
 }  // namespace aiws::gui

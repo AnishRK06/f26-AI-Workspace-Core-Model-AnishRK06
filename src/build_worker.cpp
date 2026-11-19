@@ -9,8 +9,8 @@
 namespace aiws::gui {
 
 // the one build thread starts here and lives until shutdown() (R1)
-BuildWorker::BuildWorker(QObject* parent) : QObject(parent), thread_(&BuildWorker::run, this) {
-    thread_id_ = thread_.get_id();
+BuildWorker::BuildWorker(QObject* parent) : QObject(parent), worker_(&BuildWorker::run, this) {
+    worker_id_ = worker_.get_id();
 }
 
 BuildWorker::~BuildWorker() { shutdown(); }
@@ -37,8 +37,8 @@ void BuildWorker::set_wanted_generation(std::uint64_t generation) {
 // stop_ is set under the lock and then notified, so the worker either sees
 // it before it waits or gets woken by the notify. then join: the worker
 // returns from run() at its next check, within one document's delay (R4)
-void BuildWorker::shutdown() {
-    if (!thread_.joinable()) return;  // already shut down
+void BuildWorker::shutdown() noexcept {
+    if (!worker_.joinable()) return;  // already shut down
     {
         std::lock_guard<std::mutex> lock(mutex_);
         stop_ = true;
@@ -49,10 +49,10 @@ void BuildWorker::shutdown() {
     // fault: no notify. a worker asleep in run() waiting for a request never
     // wakes up to see stop_, so this join hangs. mid-build it still stops,
     // because build() rechecks stop_ after each document's delay (R4)
-    thread_.join();
+    worker_.join();
 }
 
-std::thread::id BuildWorker::thread_id() const noexcept { return thread_id_; }
+std::thread::id BuildWorker::thread_id() const noexcept { return worker_id_; }
 
 // the cancel check, used by build() between documents and before handing
 // the result over. the one place that decides if a build is still wanted
@@ -129,7 +129,11 @@ void BuildWorker::build(const BuildRequest& request) {
 
     // queued to the GUI thread. emit never waits for the slot, so Exit can't
     // deadlock with the worker trying to hand over a result
-    emit build_finished(std::move(result));
+    if (result.core) {
+        emit build_finished(std::move(result));
+    } else {
+        emit build_failed(std::move(result));
+    }
 }
 
 }  // namespace aiws::gui
