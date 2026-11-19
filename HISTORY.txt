@@ -1,3 +1,89 @@
+commit fd931fce88645572b78102f942bdff4cc3123912
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-11-19 18:01:48 -0500
+
+    M5: tests and DESIGN.md
+
+ DESIGN.md               |  85 +++++--------
+ tests/student_tests.cpp | 327 +++++++++++++++++++++++++++++++++++++++++++++---
+ 2 files changed, 343 insertions(+), 69 deletions(-)
+
+commit 120f7b0c707e6d902a0b5592dd0081ac06a90b2a
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-11-19 11:36:52 -0500
+
+    M5: IpcServer wake pipe, no polling
+
+ include/aiws/gui/ipc_server.hpp | 23 +++++++++-----
+ include/aiws/ipc_protocol.hpp   | 15 ++++------
+ src/ipc_protocol.cpp            | 44 ++++++++++++++-------------
+ src/ipc_server.cpp              | 66 +++++++++++++++++++++++++++++++----------
+ 4 files changed, 95 insertions(+), 53 deletions(-)
+
+commit f2c4fc8056cd9337ac46ef81c1292e444eeb88dc
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-11-19 11:09:00 -0500
+
+    M5: MainWindow uses BuildWorker and CorpusState; remove CorpusBuildJob
+
+ CMakeLists.txt                        |   2 -
+ include/aiws/gui/corpus_build_job.hpp |  84 ---------------
+ include/aiws/gui/main_window.hpp      |  89 +++++++++++-----
+ src/corpus_build_job.cpp              |  85 ---------------
+ src/main_window.cpp                   | 192 ++++++++++++++++++----------------
+ 5 files changed, 168 insertions(+), 284 deletions(-)
+
+commit 47974771f25db168d026bfb69a829d6ea580bf46
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-11-19 09:09:07 -0500
+
+    M5: corpus State pattern
+
+ CMakeLists.txt                    |   2 +
+ include/aiws/gui/build_worker.hpp |  56 ++++++++-------
+ include/aiws/gui/corpus_state.hpp | 141 ++++++++++++++++++++++++++++++++++++++
+ src/build_worker.cpp              |  18 +++--
+ src/corpus_state.cpp              | 125 +++++++++++++++++++++++++++++++++
+ 5 files changed, 311 insertions(+), 31 deletions(-)
+
+commit 68526cec92b115622cc15cf5ccec4d532cd1d2dc
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-11-18 15:41:45 -0500
+
+    M5: BuildWorker implementation
+
+ CMakeLists.txt       |   2 +
+ src/build_worker.cpp | 135 +++++++++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 137 insertions(+)
+
+commit 4ee7a4c161fe4696cc4bd5612070649270b32533
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-11-18 14:07:41 -0500
+
+    M5: BuildWorker header
+
+ include/aiws/gui/build_worker.hpp | 109 ++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 109 insertions(+)
+
+commit 6f9966bfdd50eb71b0c09c8b0ef1e3d05e9b12ea
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-11-18 14:04:02 -0500
+
+    rename target to ai_workspace_m5
+
+ CMakeLists.txt |  8 ++++----
+ src/main.cpp   | 10 +++++-----
+ 2 files changed, 9 insertions(+), 9 deletions(-)
+
+commit cf7ddfad99182ac8419fbccdedd226691d29b9eb
+Author: AnishRK06 <kankanalaranish@gmail.com>
+Date:   2026-11-08 22:43:29 -0500
+
+    M4: HISTORY.txt
+
+ HISTORY.txt | 444 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 444 insertions(+)
+
 commit 775b09f8a27d167852ffc9086b1eaace5cdd1a8f
 Author: AnishRK06 <kankanalaranish@gmail.com>
 Date:   2026-11-08 22:39:39 -0500
